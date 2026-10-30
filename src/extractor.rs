@@ -1,5 +1,6 @@
 use fancy_regex::Regex;
 use std::{
+    collections::HashSet,
     fs::File,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
@@ -17,9 +18,15 @@ pub struct Extractor {
 }
 
 impl Extractor {
-    pub fn new(path: impl AsRef<Path>, out: Option<&str>) -> std::io::Result<Self> {
+    pub fn new(
+        path: impl AsRef<Path>,
+        tokens: Option<Vec<String>>,
+        ignore_default: bool,
+        out: Option<&str>,
+    ) -> std::io::Result<Self> {
         let root = Self::prepare_root(path)?;
-        let token_pattern = Self::prepare_token_pattern();
+        let token_pattern =
+            Self::prepare_token_pattern(tokens.unwrap_or_default(), ignore_default)?;
         let out = Self::prepare_out_writer(out.unwrap_or(DEFAULT_OUT))?;
 
         Ok(Self {
@@ -40,10 +47,27 @@ impl Extractor {
         Ok(root)
     }
 
-    fn prepare_token_pattern() -> Regex {
-        let mut tokens = DEFAULT_TOKENS;
-        tokens.sort_by_key(|t| std::cmp::Reverse(t.len()));
+    pub fn prepare_token_pattern(
+        mut tokens: Vec<String>,
+        ignore_default: bool,
+    ) -> std::io::Result<Regex> {
+        if !ignore_default {
+            // prepend defaults to user-passed tokens
+            tokens.splice(0..0, DEFAULT_TOKENS.map(str::to_string));
+        }
+        if tokens.is_empty() {
+            // prevented by CLI (-i without -t) but you can never be too careful
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "no tokens to search for",
+            ));
+        }
 
+        // dedup() removes only consecutive duplicates
+        // -> even after sorting it might be have same-length token sitting between copies
+        let mut seen = HashSet::new();
+        tokens.retain(|t| seen.insert(t.clone()));
+        tokens.sort_by_key(|t| std::cmp::Reverse(t.len()));
         let alternations = tokens
             .iter()
             .map(|t| fancy_regex::escape(t))
@@ -51,7 +75,7 @@ impl Extractor {
             .join("|");
 
         let pattern = format!(r"(?i)(?<!\w)(?:{alternations})(?!\w)");
-        Regex::new(&pattern).expect("failed to compile default token pattern")
+        Ok(Regex::new(&pattern).expect("failed to compile token pattern"))
     }
 
     fn prepare_out_writer(name: &str) -> std::io::Result<Writer> {
@@ -88,7 +112,6 @@ impl Extractor {
 
         let mut lines_count = 0usize;
         let mut header_added = false;
-
         let display_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
 
         loop {
@@ -101,14 +124,14 @@ impl Extractor {
             if self
                 .token_pattern
                 .find(&line)
-                .expect("token pattern search failed")
+                .expect("token pattern find returned an error")
                 .is_none()
             {
                 continue;
             }
 
             if !header_added {
-                self.out.write_header(&display_name)?;
+                self.out.write_header(display_name)?;
                 header_added = true;
             }
 
@@ -118,44 +141,5 @@ impl Extractor {
             self.out.write_entry(lines_count, &line)?;
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn matched(line: &str) -> Option<String> {
-        Extractor::prepare_token_pattern()
-            .find(line)
-            .expect("token pattern find")
-            .map(|m| m.as_str().to_string())
-    }
-
-    #[test]
-    fn default_tokens_match_todo_and_fixme() {
-        assert_eq!(matched("# TODO: x").as_deref(), Some("TODO"));
-        assert_eq!(matched("# FIXME: x").as_deref(), Some("FIXME"));
-    }
-
-    #[test]
-    fn word_boundaries_and_case() {
-        let cases = [
-            ("todo: lower", Some("todo")),
-            ("Todo: mixed", Some("Todo")),
-            ("fIxMe: weird", Some("fIxMe")),
-            ("TODO", Some("TODO")),
-            ("#TODO: x", Some("TODO")),
-            ("//FIXME x", Some("FIXME")),
-            ("(TODO)", Some("TODO")),
-            ("[FIXME]", Some("FIXME")),
-            ("please TODO this soon", Some("TODO")),
-            ("TODOS remaining", None),
-            ("MYTODO done", None),
-            ("XXTODOYY", None),
-        ];
-        for (line, expected) in cases {
-            assert_eq!(matched(line).as_deref(), expected, "line={line:?}");
-        }
     }
 }

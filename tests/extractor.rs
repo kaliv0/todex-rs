@@ -2,7 +2,7 @@ mod common;
 
 use std::fs;
 
-use common::{copy_sample, run_extract, APP_OUT};
+use common::{APP_OUT, copy_sample, run_extract, run_extract_with};
 use todexide::extractor::Extractor;
 
 #[test]
@@ -17,13 +17,74 @@ fn default_scan() {
 }
 
 #[test]
+fn t_adds_token_and_keeps_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract_with(
+        &sample.join("app.py"),
+        &out,
+        Some(vec!["WARN".into()]),
+        false,
+    )
+    .unwrap();
+    assert!(text.contains("WARN: careful"));
+    assert!(text.contains("TODO: main"));
+}
+
+#[test]
+fn i_with_t_uses_only_custom_tokens() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract_with(
+        &sample.join("app.py"),
+        &out,
+        Some(vec!["WARN".into()]),
+        true,
+    )
+    .unwrap();
+    assert!(text.contains("WARN: careful"));
+    assert!(!text.contains("TODO: main"));
+}
+
+#[test]
+fn custom_tokens_smoke() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract_with(
+        &sample.join("custom_tokens.py"),
+        &out,
+        Some(vec![
+            "NOTE".into(),
+            "!!!URGENT!!!".into(),
+            "@FIXME".into(),
+            "中文标记".into(),
+        ]),
+        true,
+    )
+    .unwrap();
+    assert!(text.contains("plain note"));
+    assert!(text.contains("!!!URGENT!!!"));
+    assert!(text.contains("at-prefixed fixme"));
+    assert!(text.contains("non-ascii"));
+}
+
+#[test]
 fn o_dir_writes_todo_inside() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let reports = sample.join("reports");
     fs::create_dir(&reports).unwrap();
 
-    let mut ext = Extractor::new(sample.join("app.py"), Some(reports.to_str().unwrap())).unwrap();
+    let mut ext = Extractor::new(
+        sample.join("app.py"),
+        None,
+        false,
+        Some(reports.to_str().unwrap()),
+    )
+    .unwrap();
     ext.run().unwrap();
 
     assert_eq!(fs::read_to_string(reports.join("TODO")).unwrap(), APP_OUT);
@@ -37,7 +98,7 @@ fn omitted_out_defaults_to_todo() {
     std::env::set_current_dir(&sample).unwrap();
 
     let result = (|| {
-        let mut ext = Extractor::new("app.py", None)?;
+        let mut ext = Extractor::new("app.py", None, false, None)?;
         ext.run()?;
         fs::read_to_string("TODO")
     })();
@@ -53,7 +114,7 @@ fn zero_token_file_empty_out() {
         let src = dir.path().join(name);
         let out = dir.path().join(format!("{name}.out"));
         fs::write(&src, content).unwrap();
-        let mut ext = Extractor::new(&src, Some(out.to_str().unwrap())).unwrap();
+        let mut ext = Extractor::new(&src, None, false, Some(out.to_str().unwrap())).unwrap();
         ext.run().unwrap();
         assert_eq!(fs::read_to_string(&out).unwrap(), "");
     }
@@ -65,7 +126,7 @@ fn o_equals_scanned_file_truncates() {
     let src = dir.path().join("f.py");
     fs::write(&src, "# TODO: will be truncated\n").unwrap();
 
-    let mut ext = Extractor::new(&src, Some(src.to_str().unwrap())).unwrap();
+    let mut ext = Extractor::new(&src, None, false, Some(src.to_str().unwrap())).unwrap();
     ext.run().unwrap();
 
     assert_eq!(fs::read_to_string(&src).unwrap(), "");
@@ -79,7 +140,7 @@ fn zero_hit_scan_truncates_stale_out() {
     fs::write(&src, "print(1)\n").unwrap();
     fs::write(&out, "stale from previous run\n").unwrap();
 
-    let mut ext = Extractor::new(&src, Some(out.to_str().unwrap())).unwrap();
+    let mut ext = Extractor::new(&src, None, false, Some(out.to_str().unwrap())).unwrap();
     ext.run().unwrap();
 
     assert_eq!(fs::read_to_string(&out).unwrap(), "");
@@ -90,7 +151,7 @@ fn missing_path_raises() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("missing");
     let out = dir.path().join("out.txt");
-    let err = match Extractor::new(&missing, Some(out.to_str().unwrap())) {
+    let err = match Extractor::new(&missing, None, false, Some(out.to_str().unwrap())) {
         Err(e) => e,
         Ok(_) => panic!("expected missing path to fail in new"),
     };
