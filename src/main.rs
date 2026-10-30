@@ -20,6 +20,7 @@ fn main() {
         cli.tokens,
         cli.ignore_default,
         cli.out.as_deref(),
+        cli.concise,
     ) {
         Ok(ext) => ext,
         //??refactor with anyhow

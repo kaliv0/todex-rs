@@ -13,4 +13,7 @@ pub struct Cli {
 
     #[arg(short = 'o', long = "out")]
     pub out: Option<String>,
+
+    #[arg(short = 'c', long = "concise")]
+    pub concise: bool,
 }

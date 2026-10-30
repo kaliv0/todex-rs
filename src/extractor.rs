@@ -15,6 +15,7 @@ pub struct Extractor {
     root: PathBuf,
     token_pattern: Regex,
     out: Writer,
+    concise: bool,
 }
 
 impl Extractor {
@@ -23,6 +24,7 @@ impl Extractor {
         tokens: Option<Vec<String>>,
         ignore_default: bool,
         out: Option<&str>,
+        concise: bool,
     ) -> std::io::Result<Self> {
         let root = Self::prepare_root(path)?;
         let token_pattern =
@@ -33,6 +35,7 @@ impl Extractor {
             root,
             token_pattern,
             out,
+            concise,
         })
     }
 
@@ -121,25 +124,105 @@ impl Extractor {
             }
             lines_count += 1;
 
-            if self
+            let Some(matched) = self
                 .token_pattern
                 .find(&line)
                 .expect("token pattern find returned an error")
-                .is_none()
-            {
+            else {
                 continue;
-            }
+            };
 
-            if !header_added {
-                self.out.write_header(display_name)?;
-                header_added = true;
-            }
-
-            if !line.ends_with('\n') {
-                line.push('\n'); // this is the last line of the file
-            }
-            self.out.write_entry(lines_count, &line)?;
+            (lines_count, header_added) = self.write_hit(
+                &mut reader,
+                display_name,
+                &line,
+                lines_count,
+                matched.start(),
+                matched.end(),
+                header_added,
+            )?;
         }
         Ok(())
+    }
+
+    fn write_hit(
+        &mut self,
+        reader: &mut BufReader<File>,
+        display_name: &str,
+        line: &str,
+        mut lines_count: usize,
+        token_start: usize,
+        token_end: usize,
+        mut header_added: bool,
+    ) -> std::io::Result<(usize, bool)> {
+        if !header_added {
+            self.out.write_header(display_name)?;
+            header_added = true;
+        }
+
+        let snippet_count = self.get_snippet_count_after_token(line, token_end, lines_count)?;
+        if self.concise {
+            self.out.write_entry(lines_count, &line[token_start..])?;
+            return Ok((lines_count, header_added));
+        }
+
+        let display_line_num = lines_count;
+        let mut snippet = line.to_string();
+        let mut line = String::new();
+        for _ in 1..snippet_count {
+            line.clear();
+            if reader.read_line(&mut line)? == 0 {
+                break;
+            }
+            snippet.push_str(&line);
+            lines_count += 1;
+        }
+
+        let entry = Self::format_snippet_entry(&snippet, display_line_num != lines_count);
+        self.out.write_entry(display_line_num, &entry)?;
+        Ok((lines_count, header_added))
+    }
+
+    fn format_snippet_entry(line: &str, multi: bool) -> String {
+        let line = if line.ends_with('\n') {
+            line.to_string() //?? unnecessary copy
+        } else {
+            format!("{line}\n") // this is the last line of the file
+        };
+
+        if multi {
+            textwrap::indent(&textwrap::dedent(&format!("\n{line}")), "\t\t")
+        } else {
+            textwrap::dedent(&line)
+        }
+    }
+
+    pub fn get_snippet_count_after_token(
+        &self,
+        line: &str,
+        token_end: usize,
+        _line_num: usize,
+    ) -> std::io::Result<usize> {
+        if !line[token_end..].starts_with('{') {
+            return Ok(1);
+        }
+
+        // advance pointer to actual count
+        let start = token_end + 1;
+        let Some(end) = line[start..].find('}') else {
+            //?? add debug note
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid snippet count: unclosed '{'",
+            ));
+        };
+
+        let body = &line[start..start + end];
+        body.parse::<usize>().map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("invalid snippet count: {body:?}"),
+            )
+        })
     }
 }

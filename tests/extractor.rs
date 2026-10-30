@@ -26,6 +26,7 @@ fn t_adds_token_and_keeps_defaults() {
         &out,
         Some(vec!["WARN".into()]),
         false,
+        false,
     )
     .unwrap();
     assert!(text.contains("WARN: careful"));
@@ -42,6 +43,7 @@ fn i_with_t_uses_only_custom_tokens() {
         &out,
         Some(vec!["WARN".into()]),
         true,
+        false,
     )
     .unwrap();
     assert!(text.contains("WARN: careful"));
@@ -63,6 +65,7 @@ fn custom_tokens_smoke() {
             "中文标记".into(),
         ]),
         true,
+        false,
     )
     .unwrap();
     assert!(text.contains("plain note"));
@@ -83,6 +86,7 @@ fn o_dir_writes_todo_inside() {
         None,
         false,
         Some(reports.to_str().unwrap()),
+        false,
     )
     .unwrap();
     ext.run().unwrap();
@@ -98,7 +102,7 @@ fn omitted_out_defaults_to_todo() {
     std::env::set_current_dir(&sample).unwrap();
 
     let result = (|| {
-        let mut ext = Extractor::new("app.py", None, false, None)?;
+        let mut ext = Extractor::new("app.py", None, false, None, false)?;
         ext.run()?;
         fs::read_to_string("TODO")
     })();
@@ -114,7 +118,8 @@ fn zero_token_file_empty_out() {
         let src = dir.path().join(name);
         let out = dir.path().join(format!("{name}.out"));
         fs::write(&src, content).unwrap();
-        let mut ext = Extractor::new(&src, None, false, Some(out.to_str().unwrap())).unwrap();
+        let mut ext =
+            Extractor::new(&src, None, false, Some(out.to_str().unwrap()), false).unwrap();
         ext.run().unwrap();
         assert_eq!(fs::read_to_string(&out).unwrap(), "");
     }
@@ -126,7 +131,7 @@ fn o_equals_scanned_file_truncates() {
     let src = dir.path().join("f.py");
     fs::write(&src, "# TODO: will be truncated\n").unwrap();
 
-    let mut ext = Extractor::new(&src, None, false, Some(src.to_str().unwrap())).unwrap();
+    let mut ext = Extractor::new(&src, None, false, Some(src.to_str().unwrap()), false).unwrap();
     ext.run().unwrap();
 
     assert_eq!(fs::read_to_string(&src).unwrap(), "");
@@ -140,7 +145,7 @@ fn zero_hit_scan_truncates_stale_out() {
     fs::write(&src, "print(1)\n").unwrap();
     fs::write(&out, "stale from previous run\n").unwrap();
 
-    let mut ext = Extractor::new(&src, None, false, Some(out.to_str().unwrap())).unwrap();
+    let mut ext = Extractor::new(&src, None, false, Some(out.to_str().unwrap()), false).unwrap();
     ext.run().unwrap();
 
     assert_eq!(fs::read_to_string(&out).unwrap(), "");
@@ -151,10 +156,103 @@ fn missing_path_raises() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("missing");
     let out = dir.path().join("out.txt");
-    let err = match Extractor::new(&missing, None, false, Some(out.to_str().unwrap())) {
+    let err = match Extractor::new(&missing, None, false, Some(out.to_str().unwrap()), false) {
         Err(e) => e,
         Ok(_) => panic!("expected missing path to fail in new"),
     };
     assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     assert!(!out.exists());
+}
+
+// --- concise / snippets ---
+
+#[test]
+fn c_omits_snippet_body() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract_with(&sample.join("snippet.py"), &out, None, false, true).unwrap();
+    assert!(text.contains("FIXME"));
+    assert!(!text.contains("return 1"));
+}
+
+#[test]
+fn snippet_includes_following_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract(&sample.join("snippet.py"), &out).unwrap();
+    assert!(text.contains("return 1"));
+}
+
+#[test]
+fn warn_snippet_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("warn.py");
+    let out = dir.path().join("out.txt");
+    fs::write(&src, "# WARN{2} check this\nx = 1\ny = 2\n").unwrap();
+    let text = run_extract_with(&src, &out, Some(vec!["WARN".into()]), true, false).unwrap();
+    assert!(text.contains("WARN"));
+    assert!(text.contains("x = 1"));
+    assert!(!text.contains("y = 2"));
+}
+
+#[test]
+fn snippet_past_eof_does_not_crash() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("short.py");
+    let out = dir.path().join("out.txt");
+    fs::write(&src, "# TODO{10} almost eof\nonly one more\n").unwrap();
+    let text = run_extract(&src, &out).unwrap();
+    assert!(text.contains("TODO"));
+    assert!(text.contains("only one more"));
+}
+
+#[test]
+fn get_snippet_count_after_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("out.txt");
+    let ext = Extractor::new(dir.path(), None, false, Some(out.to_str().unwrap()), false).unwrap();
+    for (line, expected) in [("# TODO: x", 1usize), ("# TODO{3} x", 3)] {
+        let token_end = line.find("TODO").unwrap() + "TODO".len();
+        assert_eq!(
+            ext.get_snippet_count_after_token(line, token_end, 1).unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn invalid_snippet_raises() {
+    let dir = tempfile::tempdir().unwrap();
+    for content in ["# TODO{3 no close\n", "# TODO{abc}\n", "# TODO{-1}\n"] {
+        for concise in [false, true] {
+            let src = dir.path().join("bad.py");
+            let out = dir.path().join("out.txt");
+            fs::write(&src, content).unwrap();
+            let mut ext =
+                Extractor::new(&src, None, false, Some(out.to_str().unwrap()), concise).unwrap();
+            let err = ext.run().unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+            assert!(
+                err.to_string().contains("invalid snippet count"),
+                "err={err}"
+            );
+        }
+    }
+}
+
+#[test]
+fn multiple_hits_one_header_and_line_numbers() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("multi.py");
+    let out = dir.path().join("out.txt");
+    fs::write(&src, "line1\n# TODO{2} first\nbody\n# FIXME: second\n").unwrap();
+    let text = run_extract(&src, &out).unwrap();
+    assert_eq!(text.matches("======================").count(), 1);
+    assert!(text.contains("line 2:"));
+    assert!(text.contains("line 4:"));
+    assert!(text.contains("TODO"));
+    assert!(text.contains("FIXME"));
+    assert!(text.contains("body"));
 }
