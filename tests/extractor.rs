@@ -216,7 +216,8 @@ fn get_snippet_count_after_token() {
     for (line, expected) in [("# TODO: x", 1usize), ("# TODO{3} x", 3)] {
         let token_end = line.find("TODO").unwrap() + "TODO".len();
         assert_eq!(
-            ext.get_snippet_count_after_token(line, token_end, 1).unwrap(),
+            ext.get_snippet_count_after_token(line, token_end, 1)
+                .unwrap(),
             expected
         );
     }
