@@ -34,6 +34,7 @@ pub struct Cli {
 }
 
 fn require_positive_int(s: &str) -> Result<usize, String> {
+    //??why not std::io::Result
     // usize (u64) is too much for max_depth...
     match s.parse::<i64>() {
         Ok(num) if num > 0 => Ok(num as usize),

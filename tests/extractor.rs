@@ -461,6 +461,7 @@ fn r_m_limits_depth() {
 #[test]
 fn max_depth_rejects_non_positive() {
     let dir = tempfile::tempdir().unwrap();
+    // out omitted on purpose: bad max_depth must fail before default TODO is created
     let err = match Extractor::new(
         dir.path(),
         None,

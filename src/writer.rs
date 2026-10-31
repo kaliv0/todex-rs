@@ -18,6 +18,7 @@ impl Writer {
         let file = path
             .as_ref()
             .map(|p| -> Result<_, std::io::Error> {
+                //??why not std::io::Result
                 Ok(BufWriter::new(File::create(p)?)) // truncate early out_file even if no tokens found
             })
             .transpose()?;
@@ -175,7 +176,7 @@ mod tests {
         }
     }
 
-    /// Capture pager stdin to `log`; silence pager stdout so cargo test stays clean.
+    /// capture pager stdin to `log` -> silence pager stdout so cargo test stays clean.
     fn pager_to_file(log: &Path) -> String {
         format!("tee {} >/dev/null", log.display())
     }

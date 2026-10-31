@@ -6,11 +6,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::writer::Writer;
+use crate::{exclude::ExcludeSpec, writer::Writer};
 
 pub const DEFAULT_MAX_DEPTH: usize = 120;
 pub const DEFAULT_OUT: &str = "TODO";
 pub const DEFAULT_TOKENS: [&str; 2] = ["TODO", "FIXME"];
+pub const DEFAULT_GLOBS: [&str; 2] = [".*", "__*"];
 
 pub struct Extractor {
     root: PathBuf,
@@ -36,8 +37,8 @@ impl Extractor {
         let root = Self::prepare_root(path)?;
         let token_pattern =
             Self::prepare_token_pattern(tokens.unwrap_or_default(), ignore_default)?;
-        let out = Self::prepare_out_writer(out.unwrap_or(DEFAULT_OUT), stdout, tee)?;
         let max_depth = Self::prepare_max_depth(max_depth)?;
+        let out = Self::prepare_out_writer(out.unwrap_or(DEFAULT_OUT), stdout, tee)?;
 
         Ok(Self {
             root,
@@ -66,6 +67,7 @@ impl Extractor {
     ) -> std::io::Result<Regex> {
         if !ignore_default {
             // prepend defaults to user-passed tokens
+            //?? what if we use VecDeque to prepend?
             tokens.splice(0..0, DEFAULT_TOKENS.map(str::to_string));
         }
         if tokens.is_empty() {
@@ -112,6 +114,41 @@ impl Extractor {
             )),
             Some(n) => Ok(n),
         }
+    }
+
+    fn prepare_exclude_spec(
+        &self,
+        mut exclude: Vec<String>,
+        include_hidden: bool,
+        use_gitignore: bool,
+    ) -> std::io::Result<ExcludeSpec> {
+        if use_gitignore && self.root.is_dir() {
+            //?? what if we use VecDeque to prepend?
+            exclude.splice(0..0, self.get_gitignore_patterns()?);
+        }
+
+        if !include_hidden {
+            exclude.splice(
+                0..0,
+                DEFAULT_GLOBS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>(),
+            );
+        }
+        //??extract dedup() helper
+        let mut seen = HashSet::new();
+        exclude.retain(|p| seen.insert(p.clone()));
+        ExcludeSpec::from_lines(&exclude)
+    }
+
+    fn get_gitignore_patterns(&self) -> std::io::Result<Vec<String>> {
+        let gitignore_file = self.root.join(".gitignore");
+        if !gitignore_file.is_file() {
+            return Ok(Vec::new());
+        }
+        let text = fs::read_to_string(gitignore_file)?;
+        Ok(text.lines().map(str::to_string).collect())
     }
 
     pub fn run(&mut self) -> std::io::Result<()> {
