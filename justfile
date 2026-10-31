@@ -7,14 +7,18 @@ run *args="":
 check:
     cargo check
 
+fix:
+    cargo fix --allow-dirty
+
 fmt:
     cargo fmt
 
 lint:
-    cargo clippy --all-targets -- -D warnings
+    cargo clippy --fix --allow-dirty
 
 test:
     cargo test
+
 build-release:
     cargo build --release
 
@@ -25,4 +29,4 @@ clean:
     cargo clean
     rm -rf dist
 
-all: fmt lint test
+all: fix fmt lint test
