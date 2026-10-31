@@ -18,8 +18,11 @@ fn main() {
     if cli.max_depth.is_some() && !cli.recursive {
         exit_err("-m/--max-depth flag requires -r/--recursive", 2);
     }
+    if cli.stdout && (cli.out.is_some() || cli.tee) {
+        exit_err("shouldn't mix --stdout and --out or --tee flags", 2);
+    }
 
-    let mut ext = match Extractor::new(
+    let mut extractor = Extractor::new(
         &cli.path,
         cli.tokens,
         cli.ignore_default,
@@ -27,13 +30,15 @@ fn main() {
         cli.concise,
         cli.recursive,
         cli.max_depth,
-    ) {
-        Ok(ext) => ext,
-        //??refactor with anyhow
-        Err(e) => exit_err(e, 1),
-    };
+        cli.stdout,
+        cli.tee,
+    )
+    .unwrap_or_else(|e| exit_err(e, 1));
 
-    if let Err(e) = ext.run() {
+    if let Err(e) = extractor.run() {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            std::process::exit(141)
+        }
         exit_err(e, 1);
     }
 }

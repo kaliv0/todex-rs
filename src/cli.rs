@@ -20,8 +20,17 @@ pub struct Cli {
     #[arg(short = 'r', long = "recursive")]
     pub recursive: bool,
 
-    #[arg(short = 'm', long = "max-depth", allow_hyphen_values = true, value_parser = require_positive_int)]
+    #[arg(short = 'm', long = "max-depth",
+        allow_hyphen_values = true,
+        value_parser = require_positive_int)
+    ]
     pub max_depth: Option<usize>,
+
+    #[arg(short = 's', long = "stdout")]
+    pub stdout: bool,
+
+    #[arg(long = "tee")]
+    pub tee: bool,
 }
 
 fn require_positive_int(s: &str) -> Result<usize, String> {

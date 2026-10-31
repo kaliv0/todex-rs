@@ -30,11 +30,13 @@ impl Extractor {
         concise: bool,
         recursive: bool,
         max_depth: Option<usize>,
+        stdout: bool,
+        tee: bool,
     ) -> std::io::Result<Self> {
         let root = Self::prepare_root(path)?;
         let token_pattern =
             Self::prepare_token_pattern(tokens.unwrap_or_default(), ignore_default)?;
-        let out = Self::prepare_out_writer(out.unwrap_or(DEFAULT_OUT))?;
+        let out = Self::prepare_out_writer(out.unwrap_or(DEFAULT_OUT), stdout, tee)?;
         let max_depth = Self::prepare_max_depth(max_depth)?;
 
         Ok(Self {
@@ -89,12 +91,16 @@ impl Extractor {
         Ok(Regex::new(&pattern).expect("failed to compile token pattern"))
     }
 
-    fn prepare_out_writer(name: &str) -> std::io::Result<Writer> {
+    fn prepare_out_writer(name: &str, stdout: bool, tee: bool) -> std::io::Result<Writer> {
+        if stdout {
+            return Writer::new(None, true);
+        }
+
         let mut path = PathBuf::from(name);
         if path.is_dir() {
             path = path.join(DEFAULT_OUT);
         }
-        Writer::new(path)
+        Writer::new(Some(path), tee)
     }
 
     fn prepare_max_depth(max_depth: Option<usize>) -> std::io::Result<usize> {
@@ -125,7 +131,12 @@ impl Extractor {
 
     fn process_file(&mut self, path: &Path) -> std::io::Result<()> {
         // skip out_file
-        if path.canonicalize().ok() == self.out.path().canonicalize().ok() {
+        if self
+            .out
+            .path()
+            .and_then(|out| out.canonicalize().ok())
+            .is_some_and(|out| Some(out) == path.canonicalize().ok())
+        {
             return Ok(());
         }
 
