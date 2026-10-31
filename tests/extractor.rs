@@ -3,7 +3,7 @@ mod common;
 use std::fs;
 
 use common::{APP_OUT, copy_sample, run_extract, run_extract_with, write_good_and_bad};
-use todex::extractor::Extractor;
+use todex::extractor::{DEFAULT_MAX_DEPTH, Extractor};
 
 #[test]
 fn default_scan() {
@@ -27,6 +27,8 @@ fn t_adds_token_and_keeps_defaults() {
         Some(vec!["WARN".into()]),
         false,
         false,
+        false,
+        None,
     )
     .unwrap();
     assert!(text.contains("WARN: careful"));
@@ -44,6 +46,8 @@ fn i_with_t_uses_only_custom_tokens() {
         Some(vec!["WARN".into()]),
         true,
         false,
+        false,
+        None,
     )
     .unwrap();
     assert!(text.contains("WARN: careful"));
@@ -66,6 +70,8 @@ fn custom_tokens_smoke() {
         ]),
         true,
         false,
+        false,
+        None,
     )
     .unwrap();
     assert!(text.contains("plain note"));
@@ -87,6 +93,8 @@ fn o_dir_writes_todo_inside() {
         false,
         Some(reports.to_str().unwrap()),
         false,
+        false,
+        None,
     )
     .unwrap();
     ext.run().unwrap();
@@ -102,7 +110,7 @@ fn omitted_out_defaults_to_todo() {
     std::env::set_current_dir(&sample).unwrap();
 
     let result = (|| {
-        let mut ext = Extractor::new("app.py", None, false, None, false)?;
+        let mut ext = Extractor::new("app.py", None, false, None, false, false, None)?;
         ext.run()?;
         fs::read_to_string("TODO")
     })();
@@ -118,8 +126,16 @@ fn zero_token_file_empty_out() {
         let src = dir.path().join(name);
         let out = dir.path().join(format!("{name}.out"));
         fs::write(&src, content).unwrap();
-        let mut ext =
-            Extractor::new(&src, None, false, Some(out.to_str().unwrap()), false).unwrap();
+        let mut ext = Extractor::new(
+            &src,
+            None,
+            false,
+            Some(out.to_str().unwrap()),
+            false,
+            false,
+            None,
+        )
+        .unwrap();
         ext.run().unwrap();
         assert_eq!(fs::read_to_string(&out).unwrap(), "");
     }
@@ -131,7 +147,16 @@ fn o_equals_scanned_file_truncates() {
     let src = dir.path().join("f.py");
     fs::write(&src, "# TODO: will be truncated\n").unwrap();
 
-    let mut ext = Extractor::new(&src, None, false, Some(src.to_str().unwrap()), false).unwrap();
+    let mut ext = Extractor::new(
+        &src,
+        None,
+        false,
+        Some(src.to_str().unwrap()),
+        false,
+        false,
+        None,
+    )
+    .unwrap();
     ext.run().unwrap();
 
     assert_eq!(fs::read_to_string(&src).unwrap(), "");
@@ -145,7 +170,16 @@ fn zero_hit_scan_truncates_stale_out() {
     fs::write(&src, "print(1)\n").unwrap();
     fs::write(&out, "stale from previous run\n").unwrap();
 
-    let mut ext = Extractor::new(&src, None, false, Some(out.to_str().unwrap()), false).unwrap();
+    let mut ext = Extractor::new(
+        &src,
+        None,
+        false,
+        Some(out.to_str().unwrap()),
+        false,
+        false,
+        None,
+    )
+    .unwrap();
     ext.run().unwrap();
 
     assert_eq!(fs::read_to_string(&out).unwrap(), "");
@@ -156,7 +190,15 @@ fn missing_path_raises() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("missing");
     let out = dir.path().join("out.txt");
-    let err = match Extractor::new(&missing, None, false, Some(out.to_str().unwrap()), false) {
+    let err = match Extractor::new(
+        &missing,
+        None,
+        false,
+        Some(out.to_str().unwrap()),
+        false,
+        false,
+        None,
+    ) {
         Err(e) => e,
         Ok(_) => panic!("expected missing path to fail in new"),
     };
@@ -171,7 +213,16 @@ fn c_omits_snippet_body() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_with(&sample.join("snippet.py"), &out, None, false, true).unwrap();
+    let text = run_extract_with(
+        &sample.join("snippet.py"),
+        &out,
+        None,
+        false,
+        true,
+        false,
+        None,
+    )
+    .unwrap();
     assert!(text.contains("FIXME"));
     assert!(!text.contains("return 1"));
 }
@@ -191,7 +242,16 @@ fn warn_snippet_count() {
     let src = dir.path().join("warn.py");
     let out = dir.path().join("out.txt");
     fs::write(&src, "# WARN{2} check this\nx = 1\ny = 2\n").unwrap();
-    let text = run_extract_with(&src, &out, Some(vec!["WARN".into()]), true, false).unwrap();
+    let text = run_extract_with(
+        &src,
+        &out,
+        Some(vec!["WARN".into()]),
+        true,
+        false,
+        false,
+        None,
+    )
+    .unwrap();
     assert!(text.contains("WARN"));
     assert!(text.contains("x = 1"));
     assert!(!text.contains("y = 2"));
@@ -212,7 +272,16 @@ fn snippet_past_eof_does_not_crash() {
 fn get_snippet_count_after_token() {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("out.txt");
-    let ext = Extractor::new(dir.path(), None, false, Some(out.to_str().unwrap()), false).unwrap();
+    let ext = Extractor::new(
+        dir.path(),
+        None,
+        false,
+        Some(out.to_str().unwrap()),
+        false,
+        false,
+        None,
+    )
+    .unwrap();
     for (line, expected) in [("# TODO: x", 1usize), ("# TODO{3} x", 3)] {
         let token_end = line.find("TODO").unwrap() + "TODO".len();
         assert_eq!(
@@ -231,8 +300,16 @@ fn invalid_snippet_raises() {
             let src = dir.path().join("bad.py");
             let out = dir.path().join("out.txt");
             fs::write(&src, content).unwrap();
-            let mut ext =
-                Extractor::new(&src, None, false, Some(out.to_str().unwrap()), concise).unwrap();
+            let mut ext = Extractor::new(
+                &src,
+                None,
+                false,
+                Some(out.to_str().unwrap()),
+                concise,
+                false,
+                None,
+            )
+            .unwrap();
             let err = ext.run().unwrap_err();
             assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
             assert!(
@@ -324,4 +401,92 @@ fn skips_undecodable_mid_file_keeps_prior_hits() {
     let out = dir.path().join("out.txt");
     let text = run_extract(&src, &out).unwrap();
     assert!(text.contains("TODO: first"));
+}
+
+// --- recursion ---
+
+#[test]
+fn dir_walk_order_files_then_dirs_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for name in ["c.py", "a.py", "b.py"] {
+        fs::write(root.join(name), format!("# TODO: {name}\n")).unwrap();
+    }
+    let nested = root.join("d");
+    fs::create_dir(&nested).unwrap();
+    fs::write(nested.join("z.py"), "# TODO: nested\n").unwrap();
+    let out = root.join("out.txt");
+    let text = run_extract_with(root, &out, None, false, false, true, None).unwrap();
+    assert!(text.find("TODO: a.py").unwrap() < text.find("TODO: b.py").unwrap());
+    assert!(text.find("TODO: b.py").unwrap() < text.find("TODO: c.py").unwrap());
+    assert!(text.find("TODO: c.py").unwrap() < text.find("TODO: nested").unwrap());
+}
+
+#[test]
+fn r_finds_nested() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract_with(&sample, &out, None, false, false, true, None).unwrap();
+    assert!(text.contains("TODO: deep"));
+    assert!(text.contains("TODO: deeper"));
+}
+
+#[test]
+fn r_m_limits_depth() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract_with(&sample, &out, None, false, false, true, Some(1)).unwrap();
+    assert!(text.contains("TODO: deep"));
+    assert!(!text.contains("TODO: deeper"));
+}
+
+#[test]
+fn max_depth_rejects_non_positive() {
+    let dir = tempfile::tempdir().unwrap();
+    let err = match Extractor::new(dir.path(), None, false, None, false, false, Some(0)) {
+        Err(e) => e,
+        Ok(_) => panic!("expected max_depth 0 to fail"),
+    };
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(
+        err.to_string()
+            .contains("max_depth must be a positive integer")
+    );
+}
+
+#[test]
+fn max_depth_none_uses_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("out.txt");
+    let ext = Extractor::new(
+        dir.path(),
+        None,
+        false,
+        Some(out.to_str().unwrap()),
+        false,
+        false,
+        None,
+    )
+    .unwrap();
+    assert_eq!(ext.max_depth, DEFAULT_MAX_DEPTH);
+}
+
+#[test]
+fn symlink_not_followed_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = dir.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("via_link.py"), "# TODO: through-symlink\n").unwrap();
+
+    let scan = dir.path().join("scan");
+    fs::create_dir(&scan).unwrap();
+    fs::write(scan.join("top.py"), "# TODO: top\n").unwrap();
+    std::os::unix::fs::symlink(&outside, scan.join("linkdir")).unwrap();
+
+    let out = scan.join("out.txt");
+    let text = run_extract_with(&scan, &out, None, false, false, true, None).unwrap();
+    assert!(text.contains("TODO: top"));
+    assert!(!text.contains("TODO: through-symlink"));
 }

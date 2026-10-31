@@ -19,7 +19,7 @@ pub fn copy_sample(dest: &Path) -> io::Result<PathBuf> {
 }
 
 pub fn run_extract(path: &Path, out: &Path) -> io::Result<String> {
-    run_extract_with(path, out, None, false, false)
+    run_extract_with(path, out, None, false, false, false, None)
 }
 
 pub fn run_extract_with(
@@ -28,6 +28,8 @@ pub fn run_extract_with(
     tokens: Option<Vec<String>>,
     ignore_default: bool,
     concise: bool,
+    recursive: bool,
+    max_depth: Option<usize>,
 ) -> io::Result<String> {
     let mut ext = Extractor::new(
         path,
@@ -35,6 +37,8 @@ pub fn run_extract_with(
         ignore_default,
         Some(out.to_str().unwrap()),
         concise,
+        recursive,
+        max_depth,
     )?;
     ext.run()?;
     if out.is_file() {

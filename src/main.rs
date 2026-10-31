@@ -11,8 +11,12 @@ fn exit_err(msg: impl std::fmt::Display, code: i32) -> ! {
 fn main() {
     let cli = Cli::parse();
 
+    // validate dependent flags
     if cli.ignore_default && cli.tokens.is_none() {
         exit_err("-i/--ignore-default flag requires -t/--tokens", 2);
+    }
+    if cli.max_depth.is_some() && !cli.recursive {
+        exit_err("-m/--max-depth flag requires -r/--recursive", 2);
     }
 
     let mut ext = match Extractor::new(
@@ -21,6 +25,8 @@ fn main() {
         cli.ignore_default,
         cli.out.as_deref(),
         cli.concise,
+        cli.recursive,
+        cli.max_depth,
     ) {
         Ok(ext) => ext,
         //??refactor with anyhow

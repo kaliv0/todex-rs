@@ -8,6 +8,7 @@ use std::{
 
 use crate::writer::Writer;
 
+pub const DEFAULT_MAX_DEPTH: usize = 120;
 pub const DEFAULT_OUT: &str = "TODO";
 pub const DEFAULT_TOKENS: [&str; 2] = ["TODO", "FIXME"];
 
@@ -16,6 +17,8 @@ pub struct Extractor {
     token_pattern: Regex,
     out: Writer,
     concise: bool,
+    recursive: bool,
+    pub max_depth: usize, //?? fix accessaiblity
 }
 
 impl Extractor {
@@ -25,17 +28,22 @@ impl Extractor {
         ignore_default: bool,
         out: Option<&str>,
         concise: bool,
+        recursive: bool,
+        max_depth: Option<usize>,
     ) -> std::io::Result<Self> {
         let root = Self::prepare_root(path)?;
         let token_pattern =
             Self::prepare_token_pattern(tokens.unwrap_or_default(), ignore_default)?;
         let out = Self::prepare_out_writer(out.unwrap_or(DEFAULT_OUT))?;
+        let max_depth = Self::prepare_max_depth(max_depth)?;
 
         Ok(Self {
             root,
             token_pattern,
             out,
             concise,
+            recursive,
+            max_depth,
         })
     }
 
@@ -87,6 +95,17 @@ impl Extractor {
             path = path.join(DEFAULT_OUT);
         }
         Writer::new(path)
+    }
+
+    fn prepare_max_depth(max_depth: Option<usize>) -> std::io::Result<usize> {
+        match max_depth {
+            None => Ok(DEFAULT_MAX_DEPTH),
+            Some(0) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "max_depth must be a positive integer",
+            )),
+            Some(n) => Ok(n),
+        }
     }
 
     pub fn run(&mut self) -> std::io::Result<()> {
@@ -232,19 +251,33 @@ impl Extractor {
         })
     }
 
-    fn process_dir(&mut self, path: &Path, _depth: usize) -> std::io::Result<()> {
+    fn process_dir(&mut self, path: &Path, depth: usize) -> std::io::Result<()> {
         // skip if excluded
+        if depth > self.max_depth {
+            return Ok(());
+        }
 
         let mut entries = fs::read_dir(path)?
             .filter_map(Result::ok)
             .collect::<Vec<_>>();
         entries.sort_by_key(|e| e.file_name());
 
+        let mut dirs = Vec::new();
         for entry in entries {
-            // skip odd files and symlinks
-            if entry.metadata().is_ok_and(|m| m.is_file()) {
+            // skip odd files
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            // metadata() does not follow symlinks
+            if meta.is_file() {
                 self.process_file(&entry.path())?;
+            } else if self.recursive && meta.is_dir() {
+                dirs.push(entry.path());
             }
+        }
+
+        for dir in dirs {
+            self.process_dir(&dir, depth + 1)?;
         }
         Ok(())
     }
