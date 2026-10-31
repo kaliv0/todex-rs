@@ -496,7 +496,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "todexide"
+name = "todex"
 version = "0.1.0"
 dependencies = [
  "clap",
