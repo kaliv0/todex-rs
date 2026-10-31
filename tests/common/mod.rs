@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
-use todexide::extractor::Extractor;
+use todex::extractor::Extractor;
 
 pub const APP_OUT: &str =
     "======================\napp.py\n\tline 1: # TODO: main\n\tline 2: # FIXME: bug\n";
@@ -42,6 +42,12 @@ pub fn run_extract_with(
     } else {
         Ok(String::new())
     }
+}
+
+pub fn write_good_and_bad(dir: &Path) -> io::Result<()> {
+    fs::write(dir.join("good.py"), "# TODO: keep me\n")?;
+    fs::write(dir.join("bad.bin"), b"\xff\xfe TODO: binary\n")?;
+    Ok(())
 }
 
 fn copy_dir_all(src: &Path, dst: &Path) -> io::Result<()> {

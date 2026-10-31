@@ -1,4 +1,4 @@
-use todexide::extractor::Extractor;
+use todex::extractor::Extractor;
 
 fn matched(tokens: &[&str], ignore_default: bool, line: &str) -> Option<String> {
     let tokens = tokens.iter().map(|t| (*t).to_string()).collect();

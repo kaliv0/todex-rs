@@ -2,8 +2,8 @@ mod common;
 
 use std::fs;
 
-use common::{APP_OUT, copy_sample, run_extract, run_extract_with};
-use todexide::extractor::Extractor;
+use common::{APP_OUT, copy_sample, run_extract, run_extract_with, write_good_and_bad};
+use todex::extractor::Extractor;
 
 #[test]
 fn default_scan() {
@@ -256,4 +256,72 @@ fn multiple_hits_one_header_and_line_numbers() {
     assert!(text.contains("TODO"));
     assert!(text.contains("FIXME"));
     assert!(text.contains("body"));
+}
+
+#[test]
+fn without_r_skips_nested() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract(&sample, &out).unwrap();
+    assert!(!text.contains("TODO: deep"));
+    assert!(text.contains("TODO: main"));
+}
+
+#[test]
+fn dir_walk_order_depth0_files_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for name in ["c.py", "a.py", "b.py"] {
+        fs::write(root.join(name), format!("# TODO: {name}\n")).unwrap();
+    }
+    let nested = root.join("d");
+    fs::create_dir(&nested).unwrap();
+    fs::write(nested.join("z.py"), "# TODO: nested\n").unwrap();
+    let out = root.join("out.txt");
+    let text = run_extract(root, &out).unwrap();
+    assert!(text.find("TODO: a.py").unwrap() < text.find("TODO: b.py").unwrap());
+    assert!(text.find("TODO: b.py").unwrap() < text.find("TODO: c.py").unwrap());
+    assert!(!text.contains("TODO: nested"));
+}
+
+#[test]
+fn symlink_not_followed_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = dir.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    let target = outside.join("target.py");
+    fs::write(&target, "# TODO: via-file-link\n").unwrap();
+
+    let scan = dir.path().join("scan");
+    fs::create_dir(&scan).unwrap();
+    fs::write(scan.join("top.py"), "# TODO: top\n").unwrap();
+    std::os::unix::fs::symlink(&target, scan.join("link.py")).unwrap();
+
+    let out = scan.join("out.txt");
+    let text = run_extract(&scan, &out).unwrap();
+    assert!(text.contains("TODO: top"));
+    assert!(!text.contains("TODO: via-file-link"));
+}
+
+#[test]
+fn skips_undecodable_file_and_continues() {
+    let dir = tempfile::tempdir().unwrap();
+    write_good_and_bad(dir.path()).unwrap();
+    let out = dir.path().join("out.txt");
+    let text = run_extract(dir.path(), &out).unwrap();
+    assert!(text.contains("TODO: keep me"));
+}
+
+#[test]
+fn skips_undecodable_mid_file_keeps_prior_hits() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("mixed.py");
+    let mut bytes = b"# TODO: first\n".to_vec();
+    bytes.extend(std::iter::repeat_n(b'x', 10000));
+    bytes.extend_from_slice(b"\n\xff\xfe bad\n");
+    fs::write(&src, bytes).unwrap();
+    let out = dir.path().join("out.txt");
+    let text = run_extract(&src, &out).unwrap();
+    assert!(text.contains("TODO: first"));
 }

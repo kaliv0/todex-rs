@@ -1,5 +1,5 @@
 use clap::Parser;
-use todexide::{cli::Cli, extractor::Extractor};
+use todex::{cli::Cli, extractor::Extractor};
 
 const PROG: &str = env!("CARGO_BIN_NAME");
 

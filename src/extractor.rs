@@ -1,7 +1,7 @@
 use fancy_regex::Regex;
 use std::{
     collections::HashSet,
-    fs::File,
+    fs::{self, File},
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
 };
@@ -90,25 +90,26 @@ impl Extractor {
     }
 
     pub fn run(&mut self) -> std::io::Result<()> {
-        let result = self.process();
-        self.out.close()?;
-        result
-    }
-
-    fn process(&mut self) -> std::io::Result<()> {
-        if self.root.is_file() {
+        let result = if self.root.is_file() {
             self.process_file(&self.root.clone()) //?? why clone
         } else if self.root.is_dir() {
-            todo!()
+            self.process_dir(&self.root.clone(), 0)
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("{} must be path to file or dir", self.root.display()),
             ))
-        }
+        };
+        self.out.close()?;
+        result
     }
 
     fn process_file(&mut self, path: &Path) -> std::io::Result<()> {
+        // skip out_file
+        if path.canonicalize().ok() == self.out.path().canonicalize().ok() {
+            return Ok(());
+        }
+
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
         let mut line = String::new();
@@ -117,32 +118,37 @@ impl Extractor {
         let mut header_added = false;
         let display_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
 
-        loop {
-            line.clear();
-            if reader.read_line(&mut line)? == 0 {
-                break;
+        match (|| -> std::io::Result<()> {
+            loop {
+                line.clear();
+                if reader.read_line(&mut line)? == 0 {
+                    break;
+                }
+                lines_count += 1;
+
+                let Some(matched) = self
+                    .token_pattern
+                    .find(&line)
+                    .expect("token pattern find returned an error")
+                else {
+                    continue;
+                };
+
+                (lines_count, header_added) = self.write_hit(
+                    &mut reader,
+                    display_name,
+                    &line,
+                    lines_count,
+                    matched.start(),
+                    matched.end(),
+                    header_added,
+                )?;
             }
-            lines_count += 1;
-
-            let Some(matched) = self
-                .token_pattern
-                .find(&line)
-                .expect("token pattern find returned an error")
-            else {
-                continue;
-            };
-
-            (lines_count, header_added) = self.write_hit(
-                &mut reader,
-                display_name,
-                &line,
-                lines_count,
-                matched.start(),
-                matched.end(),
-                header_added,
-            )?;
+            Ok(())
+        })() {
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => Ok(()), // if debug - log and skip
+            other => other,
         }
-        Ok(())
     }
 
     fn write_hit(
@@ -224,5 +230,22 @@ impl Extractor {
                 format!("invalid snippet count: {body:?}"),
             )
         })
+    }
+
+    fn process_dir(&mut self, path: &Path, _depth: usize) -> std::io::Result<()> {
+        // skip if excluded
+
+        let mut entries = fs::read_dir(path)?
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|e| e.file_name());
+
+        for entry in entries {
+            // skip odd files and symlinks
+            if entry.metadata().is_ok_and(|m| m.is_file()) {
+                self.process_file(&entry.path())?;
+            }
+        }
+        Ok(())
     }
 }

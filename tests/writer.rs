@@ -1,6 +1,6 @@
 use std::fs;
 
-use todexide::writer::Writer;
+use todex::writer::Writer;
 
 #[test]
 fn out_path_truncated_on_init() {
