@@ -8,7 +8,7 @@ fn out_path_truncated_on_init() {
     let out = dir.path().join("out.txt");
     fs::write(&out, "stale\n").unwrap();
 
-    let mut w = Writer::new(&out).unwrap();
+    let mut w = Writer::new(Some(out.clone()), false).unwrap();
     w.close().unwrap();
 
     assert_eq!(fs::read_to_string(&out).unwrap(), "");

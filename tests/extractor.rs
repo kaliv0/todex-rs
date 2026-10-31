@@ -95,6 +95,8 @@ fn o_dir_writes_todo_inside() {
         false,
         false,
         None,
+        false,
+        false,
     )
     .unwrap();
     ext.run().unwrap();
@@ -110,7 +112,9 @@ fn omitted_out_defaults_to_todo() {
     std::env::set_current_dir(&sample).unwrap();
 
     let result = (|| {
-        let mut ext = Extractor::new("app.py", None, false, None, false, false, None)?;
+        let mut ext = Extractor::new(
+            "app.py", None, false, None, false, false, None, false, false,
+        )?;
         ext.run()?;
         fs::read_to_string("TODO")
     })();
@@ -134,6 +138,8 @@ fn zero_token_file_empty_out() {
             false,
             false,
             None,
+            false,
+            false,
         )
         .unwrap();
         ext.run().unwrap();
@@ -155,6 +161,8 @@ fn o_equals_scanned_file_truncates() {
         false,
         false,
         None,
+        false,
+        false,
     )
     .unwrap();
     ext.run().unwrap();
@@ -178,6 +186,8 @@ fn zero_hit_scan_truncates_stale_out() {
         false,
         false,
         None,
+        false,
+        false,
     )
     .unwrap();
     ext.run().unwrap();
@@ -198,6 +208,8 @@ fn missing_path_raises() {
         false,
         false,
         None,
+        false,
+        false,
     ) {
         Err(e) => e,
         Ok(_) => panic!("expected missing path to fail in new"),
@@ -280,6 +292,8 @@ fn get_snippet_count_after_token() {
         false,
         false,
         None,
+        false,
+        false,
     )
     .unwrap();
     for (line, expected) in [("# TODO: x", 1usize), ("# TODO{3} x", 3)] {
@@ -308,6 +322,8 @@ fn invalid_snippet_raises() {
                 concise,
                 false,
                 None,
+                false,
+                false,
             )
             .unwrap();
             let err = ext.run().unwrap_err();
@@ -445,7 +461,17 @@ fn r_m_limits_depth() {
 #[test]
 fn max_depth_rejects_non_positive() {
     let dir = tempfile::tempdir().unwrap();
-    let err = match Extractor::new(dir.path(), None, false, None, false, false, Some(0)) {
+    let err = match Extractor::new(
+        dir.path(),
+        None,
+        false,
+        None,
+        false,
+        false,
+        Some(0),
+        false,
+        false,
+    ) {
         Err(e) => e,
         Ok(_) => panic!("expected max_depth 0 to fail"),
     };
@@ -468,6 +494,8 @@ fn max_depth_none_uses_default() {
         false,
         false,
         None,
+        false,
+        false,
     )
     .unwrap();
     assert_eq!(ext.max_depth, DEFAULT_MAX_DEPTH);
@@ -489,4 +517,113 @@ fn symlink_not_followed_dir() {
     let text = run_extract_with(&scan, &out, None, false, false, true, None).unwrap();
     assert!(text.contains("TODO: top"));
     assert!(!text.contains("TODO: through-symlink"));
+}
+
+#[test]
+fn s_writes_to_stdout_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tdx"))
+        .args([sample.join("app.py").to_str().unwrap(), "-s"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), APP_OUT);
+    assert!(!sample.join("TODO").exists());
+}
+
+#[test]
+fn tee_writes_stdout_and_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    // use the binary so tee stdout is captured (not mixed into the test runner)
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tdx"))
+        .args([
+            sample.join("app.py").to_str().unwrap(),
+            "-o",
+            out.to_str().unwrap(),
+            "--tee",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(fs::read_to_string(&out).unwrap(), APP_OUT);
+    assert_eq!(String::from_utf8_lossy(&output.stdout), APP_OUT);
+}
+
+#[test]
+fn tee_without_out_uses_todo() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tdx"))
+        .current_dir(&sample)
+        .args(["app.py", "--tee"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(fs::read_to_string(sample.join("TODO")).unwrap(), APP_OUT);
+    assert_eq!(String::from_utf8_lossy(&output.stdout), APP_OUT);
+}
+
+#[test]
+fn tee_survives_broken_stdout() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_tdx"))
+        .args([
+            sample.join("app.py").to_str().unwrap(),
+            "-o",
+            out.to_str().unwrap(),
+            "--tee",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    let status = child.wait().unwrap();
+    assert!(status.success() || status.code() == Some(141));
+    assert_eq!(fs::read_to_string(&out).unwrap(), APP_OUT);
+}
+
+#[test]
+fn does_not_rescan_output_file() {
+    // abs only: relative form needs chdir and races under parallel cargo test
+    let stale = "======================\nstale.py\n\tline 1: # TODO: from previous run\n";
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("TODO");
+    fs::write(&out, stale).unwrap();
+
+    let mut ext = Extractor::new(
+        &sample,
+        None,
+        false,
+        Some(out.to_str().unwrap()),
+        false,
+        true,
+        None,
+        false,
+        false,
+    )
+    .unwrap();
+    ext.run().unwrap();
+    let text = fs::read_to_string(&out).unwrap();
+    assert!(!text.contains("TODO: from previous run"));
+    assert!(text.contains("TODO: main"));
+}
+
+#[test]
+fn stdout_has_no_out_skip() {
+    let dir = tempfile::tempdir().unwrap();
+    let todo = dir.path().join("TODO");
+    fs::write(&todo, "# TODO: keep scanning me\n").unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tdx"))
+        .args([dir.path().to_str().unwrap(), "-s"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("TODO: keep scanning me"));
 }

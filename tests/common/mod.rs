@@ -39,6 +39,8 @@ pub fn run_extract_with(
         concise,
         recursive,
         max_depth,
+        false,
+        false,
     )?;
     ext.run()?;
     if out.is_file() {

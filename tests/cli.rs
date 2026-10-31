@@ -1,8 +1,9 @@
 mod common;
 
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
 
-use common::copy_sample;
+use common::{APP_OUT, copy_sample};
 
 fn tdx() -> Command {
     Command::new(env!("CARGO_BIN_EXE_tdx"))
@@ -110,4 +111,86 @@ fn r_m_limits_depth_via_cli() {
     let text = std::fs::read_to_string(&out).unwrap();
     assert!(text.contains("TODO: deep"));
     assert!(!text.contains("TODO: deeper"));
+}
+
+#[test]
+fn stdout_mix_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_str().unwrap();
+    for extra in [vec!["-s", "-o", "x"], vec!["-s", "--tee"]] {
+        let output = tdx().args([path]).args(&extra).output().expect("run tdx");
+        assert_eq!(output.status.code(), Some(2), "extra={extra:?}");
+        let err = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            err,
+            "tdx: error: shouldn't mix --stdout and --out or --tee flags\n"
+        );
+    }
+}
+
+#[test]
+fn s_via_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let output = tdx()
+        .args([sample.join("app.py").to_str().unwrap(), "-s"])
+        .output()
+        .expect("run tdx");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), APP_OUT);
+    assert!(!sample.join("TODO").exists());
+}
+
+#[test]
+fn tee_via_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("cli_tee_out.txt");
+    let output = tdx()
+        .args([
+            sample.join("app.py").to_str().unwrap(),
+            "-o",
+            out.to_str().unwrap(),
+            "--tee",
+        ])
+        .output()
+        .expect("run tdx");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), APP_OUT);
+    assert_eq!(String::from_utf8_lossy(&output.stdout), APP_OUT);
+}
+
+#[test]
+fn s_broken_pipe_exits_141() {
+    let dir = tempfile::tempdir().unwrap();
+    // many hits so writes continue after the reader closes (small out fits in the pipe buffer)
+    for i in 0..400 {
+        std::fs::write(
+            dir.path().join(format!("f{i}.py")),
+            format!("# TODO: item-{i}\n"),
+        )
+        .unwrap();
+    }
+    let mut child = tdx()
+        .args([dir.path().to_str().unwrap(), "-s"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn tdx");
+    {
+        let mut stdout = child.stdout.take().expect("stdout");
+        let mut buf = [0u8; 1];
+        let _ = stdout.read(&mut buf);
+        // drop stdout -> broken pipe for later writes
+    }
+    let status = child.wait().expect("wait tdx");
+    assert_eq!(status.code(), Some(141));
 }
