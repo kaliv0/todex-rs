@@ -22,6 +22,7 @@ pub struct Extractor {
     concise: bool,
     recursive: bool,
     pub max_depth: usize, //?? fix accessaiblity
+    debug: bool,
 }
 
 impl Extractor {
@@ -39,6 +40,7 @@ impl Extractor {
         max_depth: Option<usize>,
         stdout: bool,
         tee: bool,
+        debug: bool,
     ) -> std::io::Result<Self> {
         let root = Self::prepare_root(path)?;
         let token_pattern =
@@ -61,6 +63,7 @@ impl Extractor {
             concise,
             recursive,
             max_depth,
+            debug,
         })
     }
 
@@ -172,6 +175,10 @@ impl Extractor {
     }
 
     pub fn run(&mut self) -> std::io::Result<()> {
+        if self.debug {
+            self.out.debug("processing:\n")?;
+        }
+
         let result = if self.root.is_file() {
             self.process_file(&self.root.clone()) //?? why clone
         } else if self.root.is_dir() {
@@ -191,13 +198,17 @@ impl Extractor {
             return Ok(());
         }
 
+        let display_name = self.prepare_path_name(path);
+        if self.debug {
+            self.out.debug(&format!("\t{display_name}\n"))?;
+        }
+
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
         let mut line = String::new();
 
         let mut lines_count = 0usize;
         let mut header_added = false;
-        let display_name = self.prepare_path_name(path);
 
         match (|| -> std::io::Result<()> {
             loop {
@@ -227,7 +238,13 @@ impl Extractor {
             }
             Ok(())
         })() {
-            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => Ok(()), // if debug - log and skip
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                if self.debug {
+                    self.out
+                        .error(&format!("skipping {display_name}:\n{e}\n"))?;
+                }
+                Ok(())
+            }
             other => other,
         }
     }
@@ -288,29 +305,34 @@ impl Extractor {
         &self,
         line: &str,
         token_end: usize,
-        _line_num: usize,
+        line_num: usize,
     ) -> std::io::Result<usize> {
-        if !line[token_end..].starts_with('{') {
+        let Some(body) = line[token_end..].strip_prefix('{') else {
             return Ok(1);
-        }
+        };
 
-        // advance pointer to actual count
-        let start = token_end + 1;
-        let Some(end) = line[start..].find('}') else {
-            //?? add debug note
+        let err_msg = "invalid snippet count";
+        let Some((body, _)) = body.split_once('}') else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "invalid snippet count: unclosed '{'",
+                self.add_debug_note(format!("{err_msg}: unclosed '{{'"), line, line_num),
             ));
         };
 
-        let body = &line[start..start + end];
         body.parse::<usize>().map_err(|_| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                format!("invalid snippet count: {body:?}"),
+                self.add_debug_note(format!("{err_msg}: {body:?}"), line, line_num),
             )
         })
+    }
+
+    fn add_debug_note(&self, msg: String, line: &str, line_num: usize) -> String {
+        if self.debug {
+            format!("{}\n\tline {}: {}", msg, line_num, line.trim())
+        } else {
+            msg
+        }
     }
 
     fn prepare_path_name(&self, path: &Path) -> String {

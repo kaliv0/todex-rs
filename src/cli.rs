@@ -43,6 +43,9 @@ pub struct Cli {
 
     #[arg(long = "tee")]
     pub tee: bool,
+
+    #[arg(short = 'd', long = "debug")]
+    pub debug: bool,
 }
 
 fn require_positive_int(s: &str) -> Result<usize, String> {

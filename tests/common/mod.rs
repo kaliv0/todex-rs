@@ -80,6 +80,7 @@ pub fn run_extract_full(
         max_depth,
         false,
         false,
+        false,
     )?;
     ext.run()?;
     if out.is_file() {

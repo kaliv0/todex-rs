@@ -170,27 +170,31 @@ fn tee_via_cli() {
 
 #[test]
 fn s_broken_pipe_exits_141() {
-    let dir = tempfile::tempdir().unwrap();
-    // many hits so writes continue after the reader closes (small out fits in the pipe buffer)
-    for i in 0..400 {
-        std::fs::write(
-            dir.path().join(format!("f{i}.py")),
-            format!("# TODO: item-{i}\n"),
-        )
-        .unwrap();
+    for extra in [vec!["-s"], vec!["-s", "-d"]] {
+        let dir = tempfile::tempdir().unwrap();
+        // many hits so writes continue after the reader closes (small out fits in the pipe buffer)
+        for i in 0..400 {
+            std::fs::write(
+                dir.path().join(format!("f{i}.py")),
+                format!("# TODO: item-{i}\n"),
+            )
+            .unwrap();
+        }
+        let mut args = vec![dir.path().to_str().unwrap().to_string()];
+        args.extend(extra.into_iter().map(str::to_string));
+        let mut child = tdx()
+            .args(&args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn tdx");
+        {
+            let mut stdout = child.stdout.take().expect("stdout");
+            let mut buf = [0u8; 1];
+            let _ = stdout.read(&mut buf);
+            // drop stdout -> broken pipe for later writes
+        }
+        let status = child.wait().expect("wait tdx");
+        assert_eq!(status.code(), Some(141), "args={args:?}");
     }
-    let mut child = tdx()
-        .args([dir.path().to_str().unwrap(), "-s"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn tdx");
-    {
-        let mut stdout = child.stdout.take().expect("stdout");
-        let mut buf = [0u8; 1];
-        let _ = stdout.read(&mut buf);
-        // drop stdout -> broken pipe for later writes
-    }
-    let status = child.wait().expect("wait tdx");
-    assert_eq!(status.code(), Some(141));
 }

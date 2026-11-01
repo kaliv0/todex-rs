@@ -103,6 +103,7 @@ fn o_dir_writes_todo_inside() {
         None,
         false,
         false,
+        false,
     )
     .unwrap();
     ext.run().unwrap();
@@ -119,7 +120,8 @@ fn omitted_out_defaults_to_todo() {
 
     let result = (|| {
         let mut ext = Extractor::new(
-            "app.py", None, false, None, false, false, None, false, false, false, None, false, false,
+            "app.py", None, false, None, false, false, None, false, false, false, None, false,
+            false, false,
         )?;
         ext.run()?;
         fs::read_to_string("TODO")
@@ -150,6 +152,7 @@ fn zero_token_file_empty_out() {
             None,
             false,
             false,
+            false,
         )
         .unwrap();
         ext.run().unwrap();
@@ -175,6 +178,7 @@ fn o_equals_scanned_file_truncates() {
         false,
         false,
         None,
+        false,
         false,
         false,
     )
@@ -206,6 +210,7 @@ fn zero_hit_scan_truncates_stale_out() {
         None,
         false,
         false,
+        false,
     )
     .unwrap();
     ext.run().unwrap();
@@ -230,6 +235,7 @@ fn missing_path_raises() {
         false,
         false,
         None,
+        false,
         false,
         false,
     ) {
@@ -320,6 +326,7 @@ fn get_snippet_count_after_token() {
         None,
         false,
         false,
+        false,
     )
     .unwrap();
     for (line, expected) in [("# TODO: x", 1usize), ("# TODO{3} x", 3)] {
@@ -352,6 +359,7 @@ fn invalid_snippet_raises() {
                 concise,
                 false,
                 None,
+                false,
                 false,
                 false,
             )
@@ -466,6 +474,7 @@ fn symlink_path_raises_file() {
         None,
         false,
         false,
+        false,
     ) {
         Err(e) => e,
         Ok(_) => panic!("expected symlink path to fail in new"),
@@ -497,6 +506,7 @@ fn symlink_path_raises_dir() {
         None,
         false,
         false,
+        false,
     ) {
         Err(e) => e,
         Ok(_) => panic!("expected symlink path to fail in new"),
@@ -506,12 +516,64 @@ fn symlink_path_raises_dir() {
 }
 
 #[test]
-fn skips_undecodable_file_and_continues() {
+fn debug_emits_processing_trail() {
     let dir = tempfile::tempdir().unwrap();
-    write_good_and_bad(dir.path()).unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
     let out = dir.path().join("out.txt");
-    let text = run_extract(dir.path(), &out).unwrap();
-    assert!(text.contains("TODO: keep me"));
+    let mut ext = Extractor::new(
+        sample.join("app.py"),
+        None,
+        false,
+        None,
+        false,
+        false,
+        Some(out.to_str().unwrap()),
+        false,
+        false,
+        false,
+        None,
+        false,
+        false,
+        true,
+    )
+    .unwrap();
+    ext.run().unwrap();
+
+    let text = fs::read_to_string(&out).unwrap();
+    assert!(text.starts_with("processing:\n"));
+    assert!(text.contains("\tapp.py\n"));
+}
+
+#[test]
+fn skips_undecodable_file_and_continues() {
+    for debug in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        write_good_and_bad(dir.path()).unwrap();
+        let out = dir.path().join("out.txt");
+        let path = dir.path().to_str().unwrap();
+        let out_s = out.to_str().unwrap();
+        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_tdx"));
+        cmd.args([path, "-o", out_s]);
+        if debug {
+            cmd.arg("-d");
+        }
+        let output = cmd.output().unwrap();
+        assert!(
+            output.status.success(),
+            "stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = fs::read_to_string(&out).unwrap();
+        assert!(text.contains("TODO: keep me"));
+        let err = String::from_utf8_lossy(&output.stderr);
+        if debug {
+            assert!(err.contains("skipping"), "err={err}");
+            assert!(err.contains("bad.bin"), "err={err}");
+            assert!(err.to_ascii_lowercase().contains("utf-8"), "err={err}");
+        } else {
+            assert_eq!(err, "");
+        }
+    }
 }
 
 #[test]
@@ -523,8 +585,19 @@ fn skips_undecodable_mid_file_keeps_prior_hits() {
     bytes.extend_from_slice(b"\n\xff\xfe bad\n");
     fs::write(&src, bytes).unwrap();
     let out = dir.path().join("out.txt");
-    let text = run_extract(&src, &out).unwrap();
-    assert!(text.contains("TODO: first"));
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tdx"))
+        .args([src.to_str().unwrap(), "-o", out.to_str().unwrap(), "-d"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(fs::read_to_string(&out).unwrap().contains("TODO: first"));
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(err.contains("skipping"), "err={err}");
+    assert!(err.contains("mixed.py"), "err={err}");
 }
 
 // --- recursion ---
@@ -584,6 +657,7 @@ fn max_depth_rejects_non_positive() {
         Some(0),
         false,
         false,
+        false,
     ) {
         Err(e) => e,
         Ok(_) => panic!("expected max_depth 0 to fail"),
@@ -611,6 +685,7 @@ fn max_depth_none_uses_default() {
         false,
         false,
         None,
+        false,
         false,
         false,
     )
@@ -726,6 +801,7 @@ fn does_not_rescan_output_file() {
         false,
         true,
         None,
+        false,
         false,
         false,
     )
@@ -874,6 +950,7 @@ fn exclude_spec_defaults_bang_and_comments() {
         None,
         false,
         false,
+        false,
     )
     .unwrap();
     let spec = &ext.exclude_spec;
@@ -917,6 +994,7 @@ fn file_path_g_is_noop_but_still_processes() {
         false,
         false,
         None,
+        false,
         false,
         false,
     )

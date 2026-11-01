@@ -36,6 +36,7 @@ fn main() {
         cli.max_depth,
         cli.stdout,
         cli.tee,
+        cli.debug,
     )
     .unwrap_or_else(|e| exit_err(e, 1));
 

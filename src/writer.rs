@@ -51,6 +51,10 @@ impl Writer {
         self.write(&format!("\tline {lines_count}: {line}"))
     }
 
+    pub fn debug(&mut self, text: &str) -> std::io::Result<()> {
+        self.write(text)
+    }
+
     pub fn error(&mut self, text: &str) -> std::io::Result<()> {
         if let StdoutSink::Paged(buf) = &mut self.stdout {
             buf.push_str(text);
