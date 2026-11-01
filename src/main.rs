@@ -30,6 +30,7 @@ fn main() {
         cli.include_hidden,
         cli.use_gitignore,
         cli.out.as_deref(),
+        cli.full_path,
         cli.concise,
         cli.recursive,
         cli.max_depth,

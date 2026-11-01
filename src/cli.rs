@@ -23,6 +23,9 @@ pub struct Cli {
     #[arg(short = 'o', long = "out")]
     pub out: Option<String>,
 
+    #[arg(short = 'f', long = "full-path")]
+    pub full_path: bool,
+
     #[arg(short = 'c', long = "concise")]
     pub concise: bool,
 

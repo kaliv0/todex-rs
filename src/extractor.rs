@@ -18,6 +18,7 @@ pub struct Extractor {
     token_pattern: Regex,
     pub exclude_spec: ExcludeSpec, //?? fix accessaiblity
     out: Writer,
+    full_path: bool,
     concise: bool,
     recursive: bool,
     pub max_depth: usize, //?? fix accessaiblity
@@ -32,6 +33,7 @@ impl Extractor {
         include_hidden: bool,
         use_gitignore: bool,
         out: Option<&str>,
+        full_path: bool,
         concise: bool,
         recursive: bool,
         max_depth: Option<usize>,
@@ -55,6 +57,7 @@ impl Extractor {
             token_pattern,
             exclude_spec,
             out,
+            full_path,
             concise,
             recursive,
             max_depth,
@@ -63,6 +66,12 @@ impl Extractor {
 
     fn prepare_root(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
         let root = path.as_ref().to_path_buf();
+        if root.is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{} is a symlink", root.display()),
+            ));
+        }
         if !root.exists() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -188,7 +197,7 @@ impl Extractor {
 
         let mut lines_count = 0usize;
         let mut header_added = false;
-        let display_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let display_name = self.prepare_path_name(path);
 
         match (|| -> std::io::Result<()> {
             loop {
@@ -208,7 +217,7 @@ impl Extractor {
 
                 (lines_count, header_added) = self.write_hit(
                     &mut reader,
-                    display_name,
+                    &display_name,
                     &line,
                     lines_count,
                     matched.start(),
@@ -302,6 +311,22 @@ impl Extractor {
                 format!("invalid snippet count: {body:?}"),
             )
         })
+    }
+
+    fn prepare_path_name(&self, path: &Path) -> String {
+        //??can we improve this
+        if self.full_path {
+            std::path::absolute(path)
+                .unwrap_or_else(|_| path.to_path_buf())
+                .display()
+                .to_string()
+        } else if self.recursive {
+            path.display().to_string()
+        } else {
+            path.file_name()
+                .map(|os_str| os_str.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        }
     }
 
     fn process_dir(&mut self, path: &Path, depth: usize) -> std::io::Result<()> {

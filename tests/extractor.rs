@@ -99,6 +99,7 @@ fn o_dir_writes_todo_inside() {
         Some(reports.to_str().unwrap()),
         false,
         false,
+        false,
         None,
         false,
         false,
@@ -118,7 +119,7 @@ fn omitted_out_defaults_to_todo() {
 
     let result = (|| {
         let mut ext = Extractor::new(
-            "app.py", None, false, None, false, false, None, false, false, None, false, false,
+            "app.py", None, false, None, false, false, None, false, false, false, None, false, false,
         )?;
         ext.run()?;
         fs::read_to_string("TODO")
@@ -145,6 +146,7 @@ fn zero_token_file_empty_out() {
             Some(out.to_str().unwrap()),
             false,
             false,
+            false,
             None,
             false,
             false,
@@ -169,6 +171,7 @@ fn o_equals_scanned_file_truncates() {
         false,
         false,
         Some(src.to_str().unwrap()),
+        false,
         false,
         false,
         None,
@@ -199,6 +202,7 @@ fn zero_hit_scan_truncates_stale_out() {
         Some(out.to_str().unwrap()),
         false,
         false,
+        false,
         None,
         false,
         false,
@@ -222,6 +226,7 @@ fn missing_path_raises() {
         false,
         false,
         Some(out.to_str().unwrap()),
+        false,
         false,
         false,
         None,
@@ -311,6 +316,7 @@ fn get_snippet_count_after_token() {
         Some(out.to_str().unwrap()),
         false,
         false,
+        false,
         None,
         false,
         false,
@@ -342,6 +348,7 @@ fn invalid_snippet_raises() {
                 false,
                 false,
                 Some(out.to_str().unwrap()),
+                false,
                 concise,
                 false,
                 None,
@@ -372,6 +379,23 @@ fn multiple_hits_one_header_and_line_numbers() {
     assert!(text.contains("TODO"));
     assert!(text.contains("FIXME"));
     assert!(text.contains("body"));
+}
+
+#[test]
+fn f_writes_absolute_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let target = sample.join("app.py");
+    let out = sample.join("out.txt");
+    let text = run_extract_full(
+        &target, &out, None, false, None, false, false, true, false, false, None,
+    )
+    .unwrap();
+    let abs = std::path::absolute(&target).unwrap();
+    assert!(
+        text.contains(&abs.to_string_lossy().to_string()),
+        "expected absolute path in header, got:\n{text}"
+    );
 }
 
 #[test]
@@ -418,6 +442,67 @@ fn symlink_not_followed_file() {
     let text = run_extract(&scan, &out).unwrap();
     assert!(text.contains("TODO: top"));
     assert!(!text.contains("TODO: via-file-link"));
+}
+
+#[test]
+fn symlink_path_raises_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("file.py");
+    fs::write(&target, "# TODO: x\n").unwrap();
+    let link = dir.path().join("link.py");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let out = dir.path().join("out.txt");
+    let err = match Extractor::new(
+        &link,
+        None,
+        false,
+        None,
+        false,
+        false,
+        Some(out.to_str().unwrap()),
+        false,
+        false,
+        false,
+        None,
+        false,
+        false,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("expected symlink path to fail in new"),
+    };
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(err.to_string().contains("is a symlink"));
+}
+
+#[test]
+fn symlink_path_raises_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("dir");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("x.py"), "# TODO: x\n").unwrap();
+    let link = dir.path().join("linkdir");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let out = dir.path().join("out.txt");
+    let err = match Extractor::new(
+        &link,
+        None,
+        false,
+        None,
+        false,
+        false,
+        Some(out.to_str().unwrap()),
+        false,
+        false,
+        false,
+        None,
+        false,
+        false,
+    ) {
+        Err(e) => e,
+        Ok(_) => panic!("expected symlink path to fail in new"),
+    };
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(err.to_string().contains("is a symlink"));
 }
 
 #[test]
@@ -495,6 +580,7 @@ fn max_depth_rejects_non_positive() {
         None,
         false,
         false,
+        false,
         Some(0),
         false,
         false,
@@ -521,6 +607,7 @@ fn max_depth_none_uses_default() {
         false,
         false,
         Some(out.to_str().unwrap()),
+        false,
         false,
         false,
         None,
@@ -636,6 +723,7 @@ fn does_not_rescan_output_file() {
         false,
         Some(out.to_str().unwrap()),
         false,
+        false,
         true,
         None,
         false,
@@ -677,6 +765,7 @@ fn x_skips_patterns() {
         false,
         false,
         false,
+        false,
         true,
         None,
     )
@@ -702,7 +791,7 @@ fn h_includes_hidden_and_dunder() {
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
     let text = run_extract_full(
-        &sample, &out, None, false, None, true, false, false, true, None,
+        &sample, &out, None, false, None, true, false, false, false, true, None,
     )
     .unwrap();
     assert!(text.contains("TODO: hidden"));
@@ -715,7 +804,7 @@ fn g_applies_gitignore_and_default_hidden() {
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
     let text = run_extract_full(
-        &sample, &out, None, false, None, false, true, false, true, None,
+        &sample, &out, None, false, None, false, true, false, false, true, None,
     )
     .unwrap();
     assert!(!text.contains("TODO: vendored"));
@@ -730,7 +819,7 @@ fn g_with_h_includes_hidden_but_keeps_gitignore() {
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
     let text = run_extract_full(
-        &sample, &out, None, false, None, true, true, false, true, None,
+        &sample, &out, None, false, None, true, true, false, false, true, None,
     )
     .unwrap();
     assert!(text.contains("TODO: hidden"));
@@ -752,6 +841,7 @@ fn g_with_x_bang_reincludes_vendor() {
         Some(vec!["!vendor/".into(), "!vendor/**".into()]),
         false,
         true,
+        false,
         false,
         true,
         None,
@@ -780,6 +870,7 @@ fn exclude_spec_defaults_bang_and_comments() {
         Some(out.to_str().unwrap()),
         false,
         false,
+        false,
         None,
         false,
         false,
@@ -802,7 +893,7 @@ fn g_missing_gitignore_is_noop() {
     let bare = sample.join("bare");
     let out = bare.join("out.txt");
     let text = run_extract_full(
-        &bare, &out, None, false, None, false, true, false, false, None,
+        &bare, &out, None, false, None, false, true, false, false, false, None,
     )
     .unwrap();
     assert!(text.contains("TODO: bare"));
@@ -824,6 +915,7 @@ fn file_path_g_is_noop_but_still_processes() {
         Some(out.to_str().unwrap()),
         false,
         false,
+        false,
         None,
         false,
         false,
@@ -840,6 +932,7 @@ fn file_path_g_is_noop_but_still_processes() {
         None,
         false,
         true,
+        false,
         false,
         false,
         None,
