@@ -23,6 +23,7 @@ const TRASH: &str = r#"
 #[command(
     name = "tdx",
     about = TRASH,
+    version,
     help_template = "{about-with-newline}{all-args}{after-help}",
 )]
 pub struct Cli {
