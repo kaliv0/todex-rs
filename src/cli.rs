@@ -1,7 +1,30 @@
 use clap::Parser;
 
+const TRASH: &str = r#"
+       ________________   ___/-\___     ___/-\___     ___/-\___
+     / /             ||  |---------|   |---------|   |---------|
+    / /              ||   |       |     | | | | |     |   |   |
+   / /             __||   |       |     | | | | |     | | | | |
+  / /   \\        I  ||   |       |     | | | | |     | | | | |
+ (-------------------||   | | | | |     | | | | |     | | | | |
+ ||               == ||   |_______|     |_______|     |_______|
+ ||       TODEX      | =============================================
+ ||          ____    |                                ____      |
+( | o      / ____ \                                 / ____ \    |)
+ ||      / / . . \ \                              / / . . \ \   |
+[ |_____| | .   . | |____________________________| | .   . | |__]
+          | .   . |                                | .   . |
+           \_____/                                  \_____/
+
+            Peak trash sniffer and TODO extractor
+"#;
+
 #[derive(Parser, Debug)]
-#[command(name = "tdx")]
+#[command(
+    name = "tdx",
+    about = TRASH,
+    help_template = "{about-with-newline}{all-args}{after-help}",
+)]
 pub struct Cli {
     #[arg(value_name = "PATH", help = "path to file or dir to process")]
     pub path: String,
@@ -18,7 +41,6 @@ the extractor will include multiline snippet with the length specified between t
     #FIXME{3} - revisit after release
     if self.foo == "bar":
         return f"fizz{buzz}"
-
 "#
     )]
     pub tokens: Option<Vec<String>>,
@@ -43,7 +65,6 @@ the extractor will include multiline snippet with the length specified between t
     vendor/      directory and its contents
     **/*.pyc     nested matches
     !fizz.md     re-include after a broader exclude
-
 "#
     )]
     pub exclude: Option<Vec<String>>,
