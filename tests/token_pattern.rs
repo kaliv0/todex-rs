@@ -12,7 +12,6 @@ fn matched(tokens: &[&str], ignore_default: bool, line: &str) -> Option<String> 
 #[test]
 fn empty_with_ignore_default_raises() {
     let err = Extractor::prepare_token_pattern(Vec::new(), true).unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(err.to_string().contains("no tokens"));
 }
 

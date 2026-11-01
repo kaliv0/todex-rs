@@ -118,13 +118,13 @@ fn omitted_out_defaults_to_todo() {
     let prev = std::env::current_dir().unwrap();
     std::env::set_current_dir(&sample).unwrap();
 
-    let result = (|| {
+    let result = (|| -> anyhow::Result<_> {
         let mut ext = Extractor::new(
             "app.py", None, false, None, false, false, None, false, false, false, None, false,
             false, false,
         )?;
         ext.run()?;
-        fs::read_to_string("TODO")
+        Ok(fs::read_to_string("TODO")?)
     })();
 
     std::env::set_current_dir(prev).unwrap();
@@ -242,7 +242,7 @@ fn missing_path_raises() {
         Err(e) => e,
         Ok(_) => panic!("expected missing path to fail in new"),
     };
-    assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    assert!(err.to_string().contains("not found"));
     assert!(!out.exists());
 }
 
@@ -365,7 +365,6 @@ fn invalid_snippet_raises() {
             )
             .unwrap();
             let err = ext.run().unwrap_err();
-            assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
             assert!(
                 err.to_string().contains("invalid snippet count"),
                 "err={err}"
@@ -479,7 +478,6 @@ fn symlink_path_raises_file() {
         Err(e) => e,
         Ok(_) => panic!("expected symlink path to fail in new"),
     };
-    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(err.to_string().contains("is a symlink"));
 }
 
@@ -511,7 +509,6 @@ fn symlink_path_raises_dir() {
         Err(e) => e,
         Ok(_) => panic!("expected symlink path to fail in new"),
     };
-    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(err.to_string().contains("is a symlink"));
 }
 
@@ -662,7 +659,6 @@ fn max_depth_rejects_non_positive() {
         Err(e) => e,
         Ok(_) => panic!("expected max_depth 0 to fail"),
     };
-    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(
         err.to_string()
             .contains("max_depth must be a positive integer")
@@ -776,7 +772,8 @@ fn tee_survives_broken_stdout() {
         .unwrap();
     drop(child.stdout.take());
     let status = child.wait().unwrap();
-    assert!(status.success() || status.code() == Some(141));
+    // tee keeps writing the file; broken stdout is not a hard failure for tee
+    assert!(status.success() || status.code() == Some(1));
     assert_eq!(fs::read_to_string(&out).unwrap(), APP_OUT);
 }
 

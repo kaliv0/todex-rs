@@ -16,7 +16,7 @@ fn missing_dependent_flag_errors_for_i() {
         .args(["-i", dir.path().to_str().unwrap()])
         .output()
         .expect("run tdx");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let err = String::from_utf8_lossy(&output.stderr);
     assert_eq!(
         err,
@@ -31,7 +31,7 @@ fn missing_dependent_flag_errors_for_m() {
         .args(["-m", "20", dir.path().to_str().unwrap()])
         .output()
         .expect("run tdx");
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(1));
     let err = String::from_utf8_lossy(&output.stderr);
     assert_eq!(
         err,
@@ -119,7 +119,7 @@ fn stdout_mix_errors() {
     let path = dir.path().to_str().unwrap();
     for extra in [vec!["-s", "-o", "x"], vec!["-s", "--tee"]] {
         let output = tdx().args([path]).args(&extra).output().expect("run tdx");
-        assert_eq!(output.status.code(), Some(2), "extra={extra:?}");
+        assert_eq!(output.status.code(), Some(1), "extra={extra:?}");
         let err = String::from_utf8_lossy(&output.stderr);
         assert_eq!(
             err,
@@ -169,7 +169,7 @@ fn tee_via_cli() {
 }
 
 #[test]
-fn s_broken_pipe_exits_141() {
+fn s_broken_pipe_exits_nonzero() {
     for extra in [vec!["-s"], vec!["-s", "-d"]] {
         let dir = tempfile::tempdir().unwrap();
         // many hits so writes continue after the reader closes (small out fits in the pipe buffer)
@@ -185,7 +185,7 @@ fn s_broken_pipe_exits_141() {
         let mut child = tdx()
             .args(&args)
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("spawn tdx");
         {
@@ -194,7 +194,13 @@ fn s_broken_pipe_exits_141() {
             let _ = stdout.read(&mut buf);
             // drop stdout -> broken pipe for later writes
         }
-        let status = child.wait().expect("wait tdx");
-        assert_eq!(status.code(), Some(141), "args={args:?}");
+        let output = child.wait_with_output().expect("wait tdx");
+        // silent like Python; exit 1 (Python used 141)
+        assert_eq!(output.status.code(), Some(1), "args={args:?}");
+        assert!(
+            output.stderr.is_empty(),
+            "stderr should be quiet on broken pipe, got={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }

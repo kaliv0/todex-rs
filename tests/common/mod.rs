@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
+use anyhow::Result;
 use todex::extractor::Extractor;
 
 pub const APP_OUT: &str =
@@ -25,7 +26,7 @@ pub fn copy_sample(dest: &Path) -> io::Result<PathBuf> {
     Ok(project)
 }
 
-pub fn run_extract(path: &Path, out: &Path) -> io::Result<String> {
+pub fn run_extract(path: &Path, out: &Path) -> Result<String> {
     run_extract_with(path, out, None, false, false, false, None)
 }
 
@@ -37,7 +38,7 @@ pub fn run_extract_with(
     concise: bool,
     recursive: bool,
     max_depth: Option<usize>,
-) -> io::Result<String> {
+) -> Result<String> {
     run_extract_full(
         path,
         out,
@@ -65,7 +66,7 @@ pub fn run_extract_full(
     concise: bool,
     recursive: bool,
     max_depth: Option<usize>,
-) -> io::Result<String> {
+) -> Result<String> {
     let mut ext = Extractor::new(
         path,
         tokens,
@@ -84,7 +85,7 @@ pub fn run_extract_full(
     )?;
     ext.run()?;
     if out.is_file() {
-        fs::read_to_string(out)
+        Ok(fs::read_to_string(out)?)
     } else {
         Ok(String::new())
     }

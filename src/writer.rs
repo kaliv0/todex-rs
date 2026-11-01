@@ -1,10 +1,23 @@
+use anyhow::Result;
 use std::{
-    env,
+    env, error,
+    fmt::{self, Display, Formatter},
     fs::File,
     io::{self, BufWriter, IsTerminal, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
+
+#[derive(Debug)]
+pub struct StopExtractionError; //??move outside of writer.rs
+
+impl Display for StopExtractionError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "stop extraction")
+    }
+}
+
+impl error::Error for StopExtractionError {}
 
 pub struct Writer {
     path: Option<PathBuf>,
@@ -14,12 +27,12 @@ pub struct Writer {
 }
 
 impl Writer {
-    pub fn new(path: Option<PathBuf>, to_stdout: bool) -> std::io::Result<Self> {
+    pub fn new(path: Option<PathBuf>, to_stdout: bool) -> Result<Self> {
         let file = path
             .as_ref()
-            .map(|p| -> Result<_, std::io::Error> {
-                //??why not std::io::Result
-                Ok(BufWriter::new(File::create(p)?)) // truncate early out_file even if no tokens found
+            .map(|p| -> Result<_> {
+                // truncate early out_file even if no tokens found
+                Ok(BufWriter::new(File::create(p)?))
             })
             .transpose()?;
 
@@ -43,19 +56,19 @@ impl Writer {
         self.path.as_deref()
     }
 
-    pub fn write_header(&mut self, path_name: &str) -> std::io::Result<()> {
+    pub fn write_header(&mut self, path_name: &str) -> Result<()> {
         self.write(&format!("======================\n{path_name}\n"))
     }
 
-    pub fn write_entry(&mut self, lines_count: usize, line: &str) -> std::io::Result<()> {
+    pub fn write_entry(&mut self, lines_count: usize, line: &str) -> Result<()> {
         self.write(&format!("\tline {lines_count}: {line}"))
     }
 
-    pub fn debug(&mut self, text: &str) -> std::io::Result<()> {
+    pub fn debug(&mut self, text: &str) -> Result<()> {
         self.write(text)
     }
 
-    pub fn error(&mut self, text: &str) -> std::io::Result<()> {
+    pub fn error(&mut self, text: &str) -> Result<()> {
         if let StdoutSink::Paged(buf) = &mut self.stdout {
             buf.push_str(text);
         } else {
@@ -64,7 +77,7 @@ impl Writer {
         Ok(())
     }
 
-    fn write(&mut self, text: &str) -> std::io::Result<()> {
+    fn write(&mut self, text: &str) -> Result<()> {
         if self.to_stdout {
             let stdout_result = match &mut self.stdout {
                 StdoutSink::Raw => io::stdout()
@@ -79,7 +92,7 @@ impl Writer {
 
             if let Err(e) = stdout_result {
                 if e.kind() != io::ErrorKind::BrokenPipe {
-                    return Err(e);
+                    return Err(e.into());
                 }
 
                 self.to_stdout = false;
@@ -88,7 +101,7 @@ impl Writer {
                     self.stdout = StdoutSink::None;
                 }
                 if self.path.is_none() {
-                    return Err(e);
+                    return Err(StopExtractionError.into());
                 }
             }
         }
@@ -100,7 +113,7 @@ impl Writer {
         Ok(())
     }
 
-    pub fn close(&mut self) -> std::io::Result<()> {
+    pub fn close(&mut self) -> Result<()> {
         if let StdoutSink::Paged(buf) = std::mem::replace(&mut self.stdout, StdoutSink::None) {
             page(&buf)?;
         }
@@ -131,7 +144,7 @@ fn resolve_pager_cmd() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-fn page(text: &str) -> std::io::Result<()> {
+fn page(text: &str) -> Result<()> {
     let try_cmds = match resolve_pager_cmd() {
         Some(c) => vec![c],
         None => vec!["less".into(), "more".into()],

@@ -1,25 +1,35 @@
+use anyhow::{Result, bail};
 use clap::Parser;
-use todex::{cli::Cli, extractor::Extractor};
+use todex::{cli::Cli, extractor::Extractor, writer::StopExtractionError};
 
 const PROG: &str = env!("CARGO_BIN_NAME");
 
-fn exit_err(msg: impl std::fmt::Display, code: i32) -> ! {
-    eprintln!("{}: error: {msg}", PROG);
-    std::process::exit(code);
+fn main() {
+    if let Err(e) = run() {
+        // quiet exit on broken-pipe / stop-extraction error
+        if e.downcast_ref::<StopExtractionError>().is_some()
+            || e.downcast_ref::<std::io::Error>()
+                .is_some_and(|ioe| ioe.kind() == std::io::ErrorKind::BrokenPipe)
+        {
+            std::process::exit(1); //??switch back 141 later
+        }
+        eprintln!("{PROG}: error: {e}");
+        std::process::exit(1);
+    }
 }
 
-fn main() {
+fn run() -> Result<()> {
     let cli = Cli::parse();
 
     // validate dependent flags
     if cli.ignore_default && cli.tokens.is_none() {
-        exit_err("-i/--ignore-default flag requires -t/--tokens", 2);
+        bail!("-i/--ignore-default flag requires -t/--tokens");
     }
     if cli.max_depth.is_some() && !cli.recursive {
-        exit_err("-m/--max-depth flag requires -r/--recursive", 2);
+        bail!("-m/--max-depth flag requires -r/--recursive");
     }
     if cli.stdout && (cli.out.is_some() || cli.tee) {
-        exit_err("shouldn't mix --stdout and --out or --tee flags", 2);
+        bail!("shouldn't mix --stdout and --out or --tee flags");
     }
 
     let mut extractor = Extractor::new(
@@ -37,13 +47,8 @@ fn main() {
         cli.stdout,
         cli.tee,
         cli.debug,
-    )
-    .unwrap_or_else(|e| exit_err(e, 1));
+    )?;
 
-    if let Err(e) = extractor.run() {
-        if e.kind() == std::io::ErrorKind::BrokenPipe {
-            std::process::exit(141)
-        }
-        exit_err(e, 1);
-    }
+    extractor.run()?;
+    Ok(())
 }

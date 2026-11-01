@@ -1,3 +1,4 @@
+use anyhow::{Result, bail};
 use fancy_regex::Regex;
 use std::{
     collections::HashSet,
@@ -41,7 +42,7 @@ impl Extractor {
         stdout: bool,
         tee: bool,
         debug: bool,
-    ) -> std::io::Result<Self> {
+    ) -> Result<Self> {
         let root = Self::prepare_root(path)?;
         let token_pattern =
             Self::prepare_token_pattern(tokens.unwrap_or_default(), ignore_default)?;
@@ -67,27 +68,18 @@ impl Extractor {
         })
     }
 
-    fn prepare_root(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    fn prepare_root(path: impl AsRef<Path>) -> Result<PathBuf> {
         let root = path.as_ref().to_path_buf();
         if root.is_symlink() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("{} is a symlink", root.display()),
-            ));
+            bail!("{} is a symlink", root.display());
         }
         if !root.exists() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("{} not found", root.display()),
-            ));
+            bail!("{} not found", root.display());
         }
         Ok(root)
     }
 
-    pub fn prepare_token_pattern(
-        mut tokens: Vec<String>,
-        ignore_default: bool,
-    ) -> std::io::Result<Regex> {
+    pub fn prepare_token_pattern(mut tokens: Vec<String>, ignore_default: bool) -> Result<Regex> {
         if !ignore_default {
             // prepend defaults to user-passed tokens
             //?? what if we use VecDeque to prepend?
@@ -95,10 +87,7 @@ impl Extractor {
         }
         if tokens.is_empty() {
             // prevented by CLI (-i without -t) but you can never be too careful
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "no tokens to search for",
-            ));
+            bail!("no tokens to search for");
         }
 
         // dedup() removes only consecutive duplicates
@@ -116,7 +105,7 @@ impl Extractor {
         Ok(Regex::new(&pattern).expect("failed to compile token pattern"))
     }
 
-    fn prepare_out_writer(name: &str, stdout: bool, tee: bool) -> std::io::Result<Writer> {
+    fn prepare_out_writer(name: &str, stdout: bool, tee: bool) -> Result<Writer> {
         if stdout {
             return Writer::new(None, true);
         }
@@ -128,13 +117,10 @@ impl Extractor {
         Writer::new(Some(path), tee)
     }
 
-    fn prepare_max_depth(max_depth: Option<usize>) -> std::io::Result<usize> {
+    fn prepare_max_depth(max_depth: Option<usize>) -> Result<usize> {
         match max_depth {
             None => Ok(DEFAULT_MAX_DEPTH),
-            Some(0) => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "max_depth must be a positive integer",
-            )),
+            Some(0) => bail!("max_depth must be a positive integer"),
             Some(n) => Ok(n),
         }
     }
@@ -144,7 +130,7 @@ impl Extractor {
         mut exclude: Vec<String>,
         include_hidden: bool,
         use_gitignore: bool,
-    ) -> std::io::Result<ExcludeSpec> {
+    ) -> Result<ExcludeSpec> {
         if use_gitignore && root.is_dir() {
             //?? what if we use VecDeque to prepend?
             exclude.splice(0..0, Self::get_gitignore_patterns(root)?);
@@ -165,7 +151,7 @@ impl Extractor {
         ExcludeSpec::from_lines(&exclude)
     }
 
-    fn get_gitignore_patterns(root: &Path) -> std::io::Result<Vec<String>> {
+    fn get_gitignore_patterns(root: &Path) -> Result<Vec<String>> {
         let gitignore_file = root.join(".gitignore");
         if !gitignore_file.is_file() {
             return Ok(Vec::new());
@@ -174,7 +160,7 @@ impl Extractor {
         Ok(text.lines().map(str::to_string).collect())
     }
 
-    pub fn run(&mut self) -> std::io::Result<()> {
+    pub fn run(&mut self) -> Result<()> {
         if self.debug {
             self.out.debug("processing:\n")?;
         }
@@ -184,16 +170,13 @@ impl Extractor {
         } else if self.root.is_dir() {
             self.process_dir(&self.root.clone(), 0)
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("{} must be path to file or dir", self.root.display()),
-            ))
+            bail!("{} must be path to file or dir", self.root.display());
         };
         self.out.close()?;
         result
     }
 
-    fn process_file(&mut self, path: &Path) -> std::io::Result<()> {
+    fn process_file(&mut self, path: &Path) -> Result<()> {
         if self.is_excluded(path, false) {
             return Ok(());
         }
@@ -210,7 +193,7 @@ impl Extractor {
         let mut lines_count = 0usize;
         let mut header_added = false;
 
-        match (|| -> std::io::Result<()> {
+        match (|| -> Result<()> {
             loop {
                 line.clear();
                 if reader.read_line(&mut line)? == 0 {
@@ -238,7 +221,10 @@ impl Extractor {
             }
             Ok(())
         })() {
-            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+            Err(e)
+                if e.downcast_ref::<std::io::Error>()
+                    .is_some_and(|ioe| ioe.kind() == std::io::ErrorKind::InvalidData) =>
+            {
                 if self.debug {
                     self.out
                         .error(&format!("skipping {display_name}:\n{e}\n"))?;
@@ -258,7 +244,7 @@ impl Extractor {
         token_start: usize,
         token_end: usize,
         mut header_added: bool,
-    ) -> std::io::Result<(usize, bool)> {
+    ) -> Result<(usize, bool)> {
         if !header_added {
             self.out.write_header(display_name)?;
             header_added = true;
@@ -306,25 +292,26 @@ impl Extractor {
         line: &str,
         token_end: usize,
         line_num: usize,
-    ) -> std::io::Result<usize> {
+    ) -> Result<usize> {
         let Some(body) = line[token_end..].strip_prefix('{') else {
             return Ok(1);
         };
 
         let err_msg = "invalid snippet count";
         let Some((body, _)) = body.split_once('}') else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                self.add_debug_note(format!("{err_msg}: unclosed '{{'"), line, line_num),
-            ));
+            bail!(
+                "{}",
+                self.add_debug_note(format!("{err_msg}: unclosed '{{'"), line, line_num)
+            );
         };
 
-        body.parse::<usize>().map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                self.add_debug_note(format!("{err_msg}: {body:?}"), line, line_num),
-            )
-        })
+        match body.parse::<usize>() {
+            Ok(n) => Ok(n),
+            Err(_) => bail!(
+                "{}",
+                self.add_debug_note(format!("{err_msg}: {body:?}"), line, line_num)
+            ),
+        }
     }
 
     fn add_debug_note(&self, msg: String, line: &str, line_num: usize) -> String {
@@ -351,15 +338,15 @@ impl Extractor {
         }
     }
 
-    fn process_dir(&mut self, path: &Path, depth: usize) -> std::io::Result<()> {
+    fn process_dir(&mut self, path: &Path, depth: usize) -> Result<()> {
         if self.is_excluded(path, true) || depth > self.max_depth {
             return Ok(());
         }
 
         let mut entries = fs::read_dir(path)?
-            .filter_map(Result::ok)
+            .filter_map(|ent| ent.ok())
             .collect::<Vec<_>>();
-        entries.sort_by_key(|e| e.file_name());
+        entries.sort_by_key(|ent| ent.file_name());
 
         let mut dirs = Vec::new();
         for entry in entries {

@@ -1,3 +1,4 @@
+use anyhow::Result;
 use pathspec::GitIgnoreRegex;
 
 pub struct ExcludeSpec {
@@ -5,7 +6,7 @@ pub struct ExcludeSpec {
 }
 
 impl ExcludeSpec {
-    pub fn from_lines<S: AsRef<str>>(lines: &[S]) -> std::io::Result<Self> {
+    pub fn from_lines<S: AsRef<str>>(lines: &[S]) -> Result<Self> {
         Ok(Self {
             patterns: GitIgnoreRegex::from_spans_ignore_inert(lines).map_err(|e| {
                 std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
