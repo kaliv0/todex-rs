@@ -15,6 +15,13 @@ pub fn testdata_root() -> PathBuf {
 pub fn copy_sample(dest: &Path) -> io::Result<PathBuf> {
     let project = dest.join("project");
     copy_dir_all(&testdata_root(), &project)?;
+    // paths matching ignore rules never land in git — materialize them for the scan
+    // (same as Python conftest sample fixture)
+    fs::write(project.join("skip_me.py"), "# TODO: skip\n")?;
+    fs::create_dir_all(project.join("vendor"))?;
+    fs::write(project.join("vendor/lib.py"), "# TODO: vendored\n")?;
+    fs::create_dir_all(project.join(".venv"))?;
+    fs::write(project.join(".venv/x.py"), "# TODO: venv\n")?;
     Ok(project)
 }
 
@@ -31,10 +38,39 @@ pub fn run_extract_with(
     recursive: bool,
     max_depth: Option<usize>,
 ) -> io::Result<String> {
+    run_extract_full(
+        path,
+        out,
+        tokens,
+        ignore_default,
+        None,
+        false,
+        false,
+        concise,
+        recursive,
+        max_depth,
+    )
+}
+
+pub fn run_extract_full(
+    path: &Path,
+    out: &Path,
+    tokens: Option<Vec<String>>,
+    ignore_default: bool,
+    exclude: Option<Vec<String>>,
+    include_hidden: bool,
+    use_gitignore: bool,
+    concise: bool,
+    recursive: bool,
+    max_depth: Option<usize>,
+) -> io::Result<String> {
     let mut ext = Extractor::new(
         path,
         tokens,
         ignore_default,
+        exclude,
+        include_hidden,
+        use_gitignore,
         Some(out.to_str().unwrap()),
         concise,
         recursive,

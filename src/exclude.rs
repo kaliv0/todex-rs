@@ -19,7 +19,6 @@ impl ExcludeSpec {
         } else {
             pathspec::is_file_path_match(&self.patterns, rel)
         };
-
         outcome == Some(true)
     }
 }

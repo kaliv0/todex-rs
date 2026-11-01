@@ -2,7 +2,9 @@ mod common;
 
 use std::fs;
 
-use common::{APP_OUT, copy_sample, run_extract, run_extract_with, write_good_and_bad};
+use common::{
+    APP_OUT, copy_sample, run_extract, run_extract_full, run_extract_with, write_good_and_bad,
+};
 use todex::extractor::{DEFAULT_MAX_DEPTH, Extractor};
 
 #[test]
@@ -91,6 +93,9 @@ fn o_dir_writes_todo_inside() {
         sample.join("app.py"),
         None,
         false,
+        None,
+        false,
+        false,
         Some(reports.to_str().unwrap()),
         false,
         false,
@@ -113,7 +118,7 @@ fn omitted_out_defaults_to_todo() {
 
     let result = (|| {
         let mut ext = Extractor::new(
-            "app.py", None, false, None, false, false, None, false, false,
+            "app.py", None, false, None, false, false, None, false, false, None, false, false,
         )?;
         ext.run()?;
         fs::read_to_string("TODO")
@@ -133,6 +138,9 @@ fn zero_token_file_empty_out() {
         let mut ext = Extractor::new(
             &src,
             None,
+            false,
+            None,
+            false,
             false,
             Some(out.to_str().unwrap()),
             false,
@@ -156,6 +164,9 @@ fn o_equals_scanned_file_truncates() {
     let mut ext = Extractor::new(
         &src,
         None,
+        false,
+        None,
+        false,
         false,
         Some(src.to_str().unwrap()),
         false,
@@ -182,6 +193,9 @@ fn zero_hit_scan_truncates_stale_out() {
         &src,
         None,
         false,
+        None,
+        false,
+        false,
         Some(out.to_str().unwrap()),
         false,
         false,
@@ -203,6 +217,9 @@ fn missing_path_raises() {
     let err = match Extractor::new(
         &missing,
         None,
+        false,
+        None,
+        false,
         false,
         Some(out.to_str().unwrap()),
         false,
@@ -288,6 +305,9 @@ fn get_snippet_count_after_token() {
         dir.path(),
         None,
         false,
+        None,
+        false,
+        false,
         Some(out.to_str().unwrap()),
         false,
         false,
@@ -317,6 +337,9 @@ fn invalid_snippet_raises() {
             let mut ext = Extractor::new(
                 &src,
                 None,
+                false,
+                None,
+                false,
                 false,
                 Some(out.to_str().unwrap()),
                 concise,
@@ -469,6 +492,9 @@ fn max_depth_rejects_non_positive() {
         None,
         false,
         false,
+        None,
+        false,
+        false,
         Some(0),
         false,
         false,
@@ -490,6 +516,9 @@ fn max_depth_none_uses_default() {
     let ext = Extractor::new(
         dir.path(),
         None,
+        false,
+        None,
+        false,
         false,
         Some(out.to_str().unwrap()),
         false,
@@ -602,6 +631,9 @@ fn does_not_rescan_output_file() {
         &sample,
         None,
         false,
+        None,
+        false,
+        false,
         Some(out.to_str().unwrap()),
         false,
         true,
@@ -627,4 +659,191 @@ fn stdout_has_no_out_skip() {
         .unwrap();
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("TODO: keep scanning me"));
+}
+
+// --- excludes / hidden / gitignore ---
+
+#[test]
+fn x_skips_patterns() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract_full(
+        &sample,
+        &out,
+        None,
+        false,
+        Some(vec!["skip_me.py".into(), "vendor/".into()]),
+        false,
+        false,
+        false,
+        true,
+        None,
+    )
+    .unwrap();
+    assert!(!text.contains("TODO: skip"));
+    assert!(!text.contains("TODO: vendored"));
+    assert!(text.contains("TODO: main"));
+}
+
+#[test]
+fn skips_hidden_and_dunder() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract_with(&sample, &out, None, false, false, true, None).unwrap();
+    assert!(!text.contains("TODO: hidden"));
+    assert!(!text.contains("TODO: dunder"));
+}
+
+#[test]
+fn h_includes_hidden_and_dunder() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract_full(
+        &sample, &out, None, false, None, true, false, false, true, None,
+    )
+    .unwrap();
+    assert!(text.contains("TODO: hidden"));
+    assert!(text.contains("TODO: dunder"));
+}
+
+#[test]
+fn g_applies_gitignore_and_default_hidden() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract_full(
+        &sample, &out, None, false, None, false, true, false, true, None,
+    )
+    .unwrap();
+    assert!(!text.contains("TODO: vendored"));
+    assert!(!text.contains("TODO: skip"));
+    assert!(text.contains("TODO: main"));
+    assert!(!text.contains("TODO: hidden"));
+}
+
+#[test]
+fn g_with_h_includes_hidden_but_keeps_gitignore() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract_full(
+        &sample, &out, None, false, None, true, true, false, true, None,
+    )
+    .unwrap();
+    assert!(text.contains("TODO: hidden"));
+    assert!(!text.contains("TODO: vendored"));
+    // .venv not in .gitignore; .* default off via -H
+    assert!(text.contains("TODO: venv"));
+}
+
+#[test]
+fn g_with_x_bang_reincludes_vendor() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let text = run_extract_full(
+        &sample,
+        &out,
+        None,
+        false,
+        Some(vec!["!vendor/".into(), "!vendor/**".into()]),
+        false,
+        true,
+        false,
+        true,
+        None,
+    )
+    .unwrap();
+    assert!(text.contains("TODO: vendored"));
+}
+
+#[test]
+fn exclude_spec_defaults_bang_and_comments() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("out.txt");
+    let ext = Extractor::new(
+        dir.path(),
+        None,
+        false,
+        Some(vec![
+            "vendor/".into(),
+            "!vendor/keep.py".into(),
+            "# comment".into(),
+            "".into(),
+            "  ".into(),
+        ]),
+        false,
+        false,
+        Some(out.to_str().unwrap()),
+        false,
+        false,
+        None,
+        false,
+        false,
+    )
+    .unwrap();
+    let spec = &ext.exclude_spec;
+
+    assert!(spec.matches(".hidden.py", false));
+    assert!(spec.matches("__init__.py", false));
+    assert!(spec.matches("vendor", true) || spec.matches("vendor/", true));
+    assert!(spec.matches("vendor/lib.py", false));
+    assert!(!spec.matches("vendor/keep.py", false));
+    assert!(!spec.matches("app.py", false));
+}
+
+#[test]
+fn g_missing_gitignore_is_noop() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let bare = sample.join("bare");
+    let out = bare.join("out.txt");
+    let text = run_extract_full(
+        &bare, &out, None, false, None, false, true, false, false, None,
+    )
+    .unwrap();
+    assert!(text.contains("TODO: bare"));
+}
+
+#[test]
+fn file_path_g_is_noop_but_still_processes() {
+    // -g only loads .gitignore for directory scans -> explicit file PATH is always processed
+    let dir = tempfile::tempdir().unwrap();
+    let sample = copy_sample(dir.path()).unwrap();
+    let out = sample.join("out.txt");
+    let ext = Extractor::new(
+        sample.join("app.py"),
+        None,
+        false,
+        None,
+        false,
+        true,
+        Some(out.to_str().unwrap()),
+        false,
+        false,
+        None,
+        false,
+        false,
+    )
+    .unwrap();
+    // gitignore not loaded for file root (vendor/ from testdata .gitignore absent)
+    assert!(!ext.exclude_spec.matches("vendor/lib.py", false));
+
+    let text = run_extract_full(
+        &sample.join("app.py"),
+        &out,
+        None,
+        false,
+        None,
+        false,
+        true,
+        false,
+        false,
+        None,
+    )
+    .unwrap();
+    assert!(text.contains("TODO: main"));
 }

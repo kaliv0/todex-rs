@@ -80,7 +80,7 @@ impl Writer {
 
                 self.to_stdout = false;
                 if matches!(self.stdout, StdoutSink::Paged(_)) {
-                    // drop pager so close() won't page() a partial buffer
+                    // drop pager so close() won't page() partial buffer
                     self.stdout = StdoutSink::None;
                 }
                 if self.path.is_none() {
@@ -108,6 +108,7 @@ impl Writer {
     }
 }
 
+//?? move to separate file
 enum StdoutSink {
     None,
     Raw,
@@ -115,6 +116,7 @@ enum StdoutSink {
 }
 
 fn resolve_pager_cmd() -> Option<String> {
+    //??fix this
     #[cfg(test)]
     if let Some(cmd) = tests::pager_override() {
         return Some(cmd);

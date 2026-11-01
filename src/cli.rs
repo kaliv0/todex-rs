@@ -11,6 +11,15 @@ pub struct Cli {
     #[arg(short = 'i', long = "ignore-default")]
     pub ignore_default: bool,
 
+    #[arg(short = 'x', long = "exclude", num_args = 1..)]
+    pub exclude: Option<Vec<String>>,
+
+    #[arg(short = 'H', long = "include-hidden")]
+    pub include_hidden: bool,
+
+    #[arg(short = 'g', long = "use-gitignore")]
+    pub use_gitignore: bool,
+
     #[arg(short = 'o', long = "out")]
     pub out: Option<String>,
 

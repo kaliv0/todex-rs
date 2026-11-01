@@ -16,6 +16,7 @@ pub const DEFAULT_GLOBS: [&str; 2] = [".*", "__*"];
 pub struct Extractor {
     root: PathBuf,
     token_pattern: Regex,
+    pub exclude_spec: ExcludeSpec, //?? fix accessaiblity
     out: Writer,
     concise: bool,
     recursive: bool,
@@ -27,6 +28,9 @@ impl Extractor {
         path: impl AsRef<Path>,
         tokens: Option<Vec<String>>,
         ignore_default: bool,
+        exclude: Option<Vec<String>>,
+        include_hidden: bool,
+        use_gitignore: bool,
         out: Option<&str>,
         concise: bool,
         recursive: bool,
@@ -37,12 +41,19 @@ impl Extractor {
         let root = Self::prepare_root(path)?;
         let token_pattern =
             Self::prepare_token_pattern(tokens.unwrap_or_default(), ignore_default)?;
+        let exclude_spec = Self::prepare_exclude_spec(
+            &root,
+            exclude.unwrap_or_default(),
+            include_hidden,
+            use_gitignore,
+        )?;
         let max_depth = Self::prepare_max_depth(max_depth)?;
         let out = Self::prepare_out_writer(out.unwrap_or(DEFAULT_OUT), stdout, tee)?;
 
         Ok(Self {
             root,
             token_pattern,
+            exclude_spec,
             out,
             concise,
             recursive,
@@ -117,14 +128,14 @@ impl Extractor {
     }
 
     fn prepare_exclude_spec(
-        &self,
+        root: &Path,
         mut exclude: Vec<String>,
         include_hidden: bool,
         use_gitignore: bool,
     ) -> std::io::Result<ExcludeSpec> {
-        if use_gitignore && self.root.is_dir() {
+        if use_gitignore && root.is_dir() {
             //?? what if we use VecDeque to prepend?
-            exclude.splice(0..0, self.get_gitignore_patterns()?);
+            exclude.splice(0..0, Self::get_gitignore_patterns(root)?);
         }
 
         if !include_hidden {
@@ -142,8 +153,8 @@ impl Extractor {
         ExcludeSpec::from_lines(&exclude)
     }
 
-    fn get_gitignore_patterns(&self) -> std::io::Result<Vec<String>> {
-        let gitignore_file = self.root.join(".gitignore");
+    fn get_gitignore_patterns(root: &Path) -> std::io::Result<Vec<String>> {
+        let gitignore_file = root.join(".gitignore");
         if !gitignore_file.is_file() {
             return Ok(Vec::new());
         }
@@ -167,13 +178,7 @@ impl Extractor {
     }
 
     fn process_file(&mut self, path: &Path) -> std::io::Result<()> {
-        // skip out_file
-        if self
-            .out
-            .path()
-            .and_then(|out| out.canonicalize().ok())
-            .is_some_and(|out| Some(out) == path.canonicalize().ok())
-        {
+        if self.is_excluded(path, false) {
             return Ok(());
         }
 
@@ -300,8 +305,7 @@ impl Extractor {
     }
 
     fn process_dir(&mut self, path: &Path, depth: usize) -> std::io::Result<()> {
-        // skip if excluded
-        if depth > self.max_depth {
+        if self.is_excluded(path, true) || depth > self.max_depth {
             return Ok(());
         }
 
@@ -316,7 +320,7 @@ impl Extractor {
             let Ok(meta) = entry.metadata() else {
                 continue;
             };
-            // metadata() does not follow symlinks
+            // metadata() doesn't follow symlinks
             if meta.is_file() {
                 self.process_file(&entry.path())?;
             } else if self.recursive && meta.is_dir() {
@@ -328,5 +332,26 @@ impl Extractor {
             self.process_dir(&dir, depth + 1)?;
         }
         Ok(())
+    }
+
+    fn is_excluded(&self, path: &Path, is_dir: bool) -> bool {
+        // always process scan root
+        if path == self.root {
+            return false;
+        }
+        //skip summary file
+        if self
+            .out
+            .path()
+            .and_then(|out| out.canonicalize().ok())
+            .is_some_and(|out| Some(out) == path.canonicalize().ok())
+        {
+            return true;
+        }
+
+        let Ok(rel) = path.strip_prefix(&self.root) else {
+            return false;
+        };
+        self.exclude_spec.matches(&rel.to_string_lossy(), is_dir)
     }
 }
