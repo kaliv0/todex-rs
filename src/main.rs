@@ -7,8 +7,8 @@ use anyhow::{Result, bail};
 use clap::Parser;
 use todex::{
     cli::Cli,
+    error::{InterruptedError, StopExtractionError},
     extractor::Extractor,
-    writer::{Interrupted, StopExtraction},
 };
 
 const PROG: &str = env!("CARGO_BIN_NAME");
@@ -68,12 +68,12 @@ fn run() -> Result<()> {
 
 fn is_interrupted(e: &anyhow::Error) -> bool {
     // Ctrl-C
-    e.downcast_ref::<Interrupted>().is_some()
+    e.downcast_ref::<InterruptedError>().is_some()
 }
 
 fn is_pipe_stop(e: &anyhow::Error) -> bool {
     // pipe (`tdx | head`)
-    e.downcast_ref::<StopExtraction>().is_some()
+    e.downcast_ref::<StopExtractionError>().is_some()
         || e.downcast_ref::<std::io::Error>()
             .is_some_and(|ioe| ioe.kind() == std::io::ErrorKind::BrokenPipe)
 }

@@ -8,10 +8,7 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
 };
 
-use crate::{
-    exclude::ExcludeSpec,
-    writer::{Interrupted, Writer},
-};
+use crate::{error::InterruptedError, exclude::ExcludeSpec, writer::Writer};
 
 pub const DEFAULT_MAX_DEPTH: usize = 120;
 pub const DEFAULT_OUT: &str = "TODO";
@@ -191,7 +188,7 @@ impl Extractor {
 
     fn process_file(&mut self, path: &Path) -> Result<()> {
         if self.out.interrupted() {
-            return Err(Interrupted.into());
+            return Err(InterruptedError.into());
         }
         if self.is_excluded(path, false) {
             return Ok(());
@@ -356,7 +353,7 @@ impl Extractor {
 
     fn process_dir(&mut self, path: &Path, depth: usize) -> Result<()> {
         if self.out.interrupted() {
-            return Err(Interrupted.into());
+            return Err(InterruptedError.into());
         }
         if self.is_excluded(path, true) || depth > self.max_depth {
             return Ok(());

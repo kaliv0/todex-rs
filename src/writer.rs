@@ -1,42 +1,18 @@
 use anyhow::Result;
 use std::{
-    env, error,
-    fmt::{self, Display, Formatter},
     fs::File,
     io::{self, BufWriter, IsTerminal, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
 };
 
-//??move to separate module
-
-#[derive(Debug)]
-pub struct StopExtraction; //?? add Error suffix?
-
-impl Display for StopExtraction {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "stop extraction")
-    }
-}
-
-impl error::Error for StopExtraction {}
-
-#[derive(Debug)]
-pub struct Interrupted;
-
-impl Display for Interrupted {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "interrupted")
-    }
-}
-
-impl error::Error for Interrupted {}
-
-////////////////////////////////////
+use crate::{
+    error::{InterruptedError, StopExtractionError},
+    pager::{StdoutSink, page},
+};
 
 pub struct Writer {
     path: Option<PathBuf>,
@@ -108,7 +84,7 @@ impl Writer {
 
     fn write(&mut self, text: &str) -> Result<()> {
         if self.interrupted() {
-            return Err(Interrupted.into());
+            return Err(InterruptedError.into());
         }
 
         if self.to_stdout {
@@ -134,7 +110,7 @@ impl Writer {
                     self.stdout = StdoutSink::None;
                 }
                 if self.path.is_none() {
-                    return Err(StopExtraction.into());
+                    return Err(StopExtractionError.into());
                 }
             }
         }
@@ -158,56 +134,10 @@ impl Writer {
     }
 }
 
-//?? move to separate file
-enum StdoutSink {
-    None,
-    Raw,
-    Paged(String),
-}
-
-fn resolve_pager_cmd() -> Option<String> {
-    env::var("MANPAGER")
-        .or_else(|_| env::var("PAGER"))
-        .ok()
-        .filter(|s| !s.is_empty())
-}
-
-fn page(text: &str) -> Result<()> {
-    let try_cmds = match resolve_pager_cmd() {
-        Some(c) => vec![c],
-        None => vec!["less".into(), "more".into()],
-    };
-
-    for c in &try_cmds {
-        let Ok(mut child) = Command::new("sh")
-            .args(["-c", c])
-            .stdin(Stdio::piped())
-            .spawn()
-        else {
-            continue;
-        };
-
-        if let Some(mut stdin) = child.stdin.take() {
-            // if user quites early -> broken pipe is fine so we don't propagate error
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        let _ = child.wait();
-        return Ok(());
-    }
-
-    // if no pager available
-    match io::stdout().write_all(text.as_bytes()) {
-        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
-        other => other.map_err(Into::into),
-    }
-}
-
-////////////////////////////////////
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs, sync::Mutex};
+    use std::{env, fs, sync::Mutex};
 
     static PAGER_ENV_LOCK: Mutex<()> = Mutex::new(());
 
