@@ -1,4 +1,6 @@
 // shared fixtures and helpers for integration tests
+// each tests/*.rs that does `mod common` compiles its own copy — allow unused in crates that only need a subset
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::{fs, io};
