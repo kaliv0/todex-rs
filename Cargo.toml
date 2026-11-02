@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
+ctrlc = { version = "3.5.2", features = ["termination"] }
 fancy-regex = "0.20.0"
 pathspec = "0.3.0"
 textwrap = "0.16.4"

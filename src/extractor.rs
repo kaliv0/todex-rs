@@ -5,9 +5,13 @@ use std::{
     fs::{self, File},
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
+    sync::{Arc, atomic::AtomicBool},
 };
 
-use crate::{exclude::ExcludeSpec, writer::Writer};
+use crate::{
+    exclude::ExcludeSpec,
+    writer::{Interrupted, Writer},
+};
 
 pub const DEFAULT_MAX_DEPTH: usize = 120;
 pub const DEFAULT_OUT: &str = "TODO";
@@ -42,6 +46,7 @@ impl Extractor {
         stdout: bool,
         tee: bool,
         debug: bool,
+        interrupted: Arc<AtomicBool>,
     ) -> Result<Self> {
         let root = Self::prepare_root(path)?;
         let token_pattern =
@@ -53,7 +58,7 @@ impl Extractor {
             use_gitignore,
         )?;
         let max_depth = Self::prepare_max_depth(max_depth)?;
-        let out = Self::prepare_out_writer(out.unwrap_or(DEFAULT_OUT), stdout, tee)?;
+        let out = Self::prepare_out_writer(out.unwrap_or(DEFAULT_OUT), stdout, tee, interrupted)?;
 
         Ok(Self {
             root,
@@ -105,16 +110,21 @@ impl Extractor {
         Ok(Regex::new(&pattern).expect("failed to compile token pattern"))
     }
 
-    fn prepare_out_writer(name: &str, stdout: bool, tee: bool) -> Result<Writer> {
+    fn prepare_out_writer(
+        name: &str,
+        stdout: bool,
+        tee: bool,
+        interrupted: Arc<AtomicBool>,
+    ) -> Result<Writer> {
         if stdout {
-            return Writer::new(None, true);
+            return Writer::new(None, true, interrupted);
         }
 
         let mut path = PathBuf::from(name);
         if path.is_dir() {
             path = path.join(DEFAULT_OUT);
         }
-        Writer::new(Some(path), tee)
+        Writer::new(Some(path), tee, interrupted)
     }
 
     fn prepare_max_depth(max_depth: Option<usize>) -> Result<usize> {
@@ -161,22 +171,28 @@ impl Extractor {
     }
 
     pub fn run(&mut self) -> Result<()> {
-        if self.debug {
-            self.out.debug("processing:\n")?;
-        }
+        let walk = (|| -> Result<()> {
+            if self.debug {
+                self.out.debug("processing:\n")?;
+            }
 
-        let result = if self.root.is_file() {
-            self.process_file(&self.root.clone()) //?? why clone
-        } else if self.root.is_dir() {
-            self.process_dir(&self.root.clone(), 0)
-        } else {
-            bail!("{} must be path to file or dir", self.root.display());
-        };
-        self.out.close()?;
-        result
+            if self.root.is_file() {
+                self.process_file(&self.root.clone())
+            } else if self.root.is_dir() {
+                self.process_dir(&self.root.clone(), 0)
+            } else {
+                bail!("{} must be path to file or dir", self.root.display());
+            }
+        })();
+
+        self.out.close()?; // always flush out_file
+        walk
     }
 
     fn process_file(&mut self, path: &Path) -> Result<()> {
+        if self.out.interrupted() {
+            return Err(Interrupted.into());
+        }
         if self.is_excluded(path, false) {
             return Ok(());
         }
@@ -339,6 +355,9 @@ impl Extractor {
     }
 
     fn process_dir(&mut self, path: &Path, depth: usize) -> Result<()> {
+        if self.out.interrupted() {
+            return Err(Interrupted.into());
+        }
         if self.is_excluded(path, true) || depth > self.max_depth {
             return Ok(());
         }

@@ -6,28 +6,52 @@ use std::{
     io::{self, BufWriter, IsTerminal, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
-#[derive(Debug)]
-pub struct StopExtractionError; //??move outside of writer.rs
+//??move to separate module
 
-impl Display for StopExtractionError {
+#[derive(Debug)]
+pub struct StopExtraction; //?? add Error suffix?
+
+impl Display for StopExtraction {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "stop extraction")
     }
 }
 
-impl error::Error for StopExtractionError {}
+impl error::Error for StopExtraction {}
+
+#[derive(Debug)]
+pub struct Interrupted;
+
+impl Display for Interrupted {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "interrupted")
+    }
+}
+
+impl error::Error for Interrupted {}
+
+////////////////////////////////////
 
 pub struct Writer {
     path: Option<PathBuf>,
     to_stdout: bool,
     file: Option<BufWriter<File>>,
     stdout: StdoutSink,
+    interrupted: Arc<AtomicBool>,
 }
 
 impl Writer {
-    pub fn new(path: Option<PathBuf>, to_stdout: bool) -> Result<Self> {
+    pub fn new(
+        path: Option<PathBuf>,
+        to_stdout: bool,
+        interrupted: Arc<AtomicBool>,
+    ) -> Result<Self> {
         let file = path
             .as_ref()
             .map(|p| -> Result<_> {
@@ -49,7 +73,12 @@ impl Writer {
             to_stdout,
             file,
             stdout,
+            interrupted,
         })
+    }
+
+    pub fn interrupted(&self) -> bool {
+        self.interrupted.load(Ordering::SeqCst)
     }
 
     pub fn path(&self) -> Option<&Path> {
@@ -78,6 +107,10 @@ impl Writer {
     }
 
     fn write(&mut self, text: &str) -> Result<()> {
+        if self.interrupted() {
+            return Err(Interrupted.into());
+        }
+
         if self.to_stdout {
             let stdout_result = match &mut self.stdout {
                 StdoutSink::Raw => io::stdout()
@@ -101,7 +134,7 @@ impl Writer {
                     self.stdout = StdoutSink::None;
                 }
                 if self.path.is_none() {
-                    return Err(StopExtractionError.into());
+                    return Err(StopExtraction.into());
                 }
             }
         }
@@ -168,8 +201,10 @@ fn page(text: &str) -> Result<()> {
     }
 
     // if no pager available
-    io::stdout().write_all(text.as_bytes())?;
-    Ok(())
+    match io::stdout().write_all(text.as_bytes()) {
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        other => other.map_err(Into::into),
+    }
 }
 
 #[cfg(test)]
@@ -200,6 +235,10 @@ mod tests {
         format!("tee {} >/dev/null", log.display())
     }
 
+    fn no_interrupt() -> Arc<AtomicBool> {
+        Arc::new(AtomicBool::new(false))
+    }
+
     fn paged_writer(path: Option<PathBuf>) -> Writer {
         let file = path
             .as_ref()
@@ -209,6 +248,7 @@ mod tests {
             to_stdout: true,
             file,
             stdout: StdoutSink::Paged(String::new()),
+            interrupted: no_interrupt(),
         }
     }
 
@@ -217,7 +257,7 @@ mod tests {
         if io::stdout().is_terminal() {
             return;
         }
-        let w = Writer::new(None, true).unwrap();
+        let w = Writer::new(None, true, no_interrupt()).unwrap();
         assert!(matches!(w.stdout, StdoutSink::Raw));
     }
 
@@ -256,7 +296,7 @@ mod tests {
         if io::stdout().is_terminal() {
             return;
         }
-        let mut w = Writer::new(None, true).unwrap();
+        let mut w = Writer::new(None, true, no_interrupt()).unwrap();
         w.error("boom\n").unwrap();
     }
 

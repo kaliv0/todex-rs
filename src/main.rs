@@ -1,20 +1,27 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 use anyhow::{Result, bail};
 use clap::Parser;
-use todex::{cli::Cli, extractor::Extractor, writer::StopExtractionError};
+use todex::{
+    cli::Cli,
+    extractor::Extractor,
+    writer::{Interrupted, StopExtraction},
+};
 
 const PROG: &str = env!("CARGO_BIN_NAME");
 
 fn main() {
-    if let Err(e) = run() {
-        // quiet exit on broken-pipe / stop-extraction error
-        if e.downcast_ref::<StopExtractionError>().is_some()
-            || e.downcast_ref::<std::io::Error>()
-                .is_some_and(|ioe| ioe.kind() == std::io::ErrorKind::BrokenPipe)
-        {
-            std::process::exit(1); //??switch back 141 later
+    match run() {
+        Ok(()) => {}
+        Err(e) if is_interrupted(&e) => std::process::exit(130),
+        Err(e) if is_pipe_stop(&e) => std::process::exit(0), // 0 rg-style or 141 Unix-style
+        Err(e) => {
+            eprintln!("{PROG}: error: {e}");
+            std::process::exit(1);
         }
-        eprintln!("{PROG}: error: {e}");
-        std::process::exit(1);
     }
 }
 
@@ -32,6 +39,12 @@ fn run() -> Result<()> {
         bail!("shouldn't mix --stdout and --out or --tee flags");
     }
 
+    let interrupted = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&interrupted);
+    ctrlc::set_handler(move || {
+        flag.store(true, Ordering::SeqCst);
+    })?;
+
     let mut extractor = Extractor::new(
         &cli.path,
         cli.tokens,
@@ -47,8 +60,20 @@ fn run() -> Result<()> {
         cli.stdout,
         cli.tee,
         cli.debug,
+        interrupted,
     )?;
 
-    extractor.run()?;
-    Ok(())
+    extractor.run()
+}
+
+fn is_interrupted(e: &anyhow::Error) -> bool {
+    // Ctrl-C
+    e.downcast_ref::<Interrupted>().is_some()
+}
+
+fn is_pipe_stop(e: &anyhow::Error) -> bool {
+    // pipe (`tdx | head`)
+    e.downcast_ref::<StopExtraction>().is_some()
+        || e.downcast_ref::<std::io::Error>()
+            .is_some_and(|ioe| ioe.kind() == std::io::ErrorKind::BrokenPipe)
 }
