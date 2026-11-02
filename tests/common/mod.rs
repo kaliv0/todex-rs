@@ -3,8 +3,14 @@
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
+use std::sync::{Arc, atomic::AtomicBool};
+
 use anyhow::Result;
 use todex::extractor::Extractor;
+
+pub fn no_interrupt() -> Arc<AtomicBool> {
+    Arc::new(AtomicBool::new(false))
+}
 
 pub const APP_OUT: &str =
     "======================\napp.py\n\tline 1: # TODO: main\n\tline 2: # FIXME: bug\n";
@@ -82,6 +88,7 @@ pub fn run_extract_full(
         false,
         false,
         false,
+        no_interrupt(),
     )?;
     ext.run()?;
     if out.is_file() {

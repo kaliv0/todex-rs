@@ -3,7 +3,8 @@ mod common;
 use std::fs;
 
 use common::{
-    APP_OUT, copy_sample, run_extract, run_extract_full, run_extract_with, write_good_and_bad,
+    APP_OUT, copy_sample, no_interrupt, run_extract, run_extract_full, run_extract_with,
+    write_good_and_bad,
 };
 use todex::extractor::{DEFAULT_MAX_DEPTH, Extractor};
 
@@ -104,6 +105,7 @@ fn o_dir_writes_todo_inside() {
         false,
         false,
         false,
+        no_interrupt(),
     )
     .unwrap();
     ext.run().unwrap();
@@ -120,8 +122,21 @@ fn omitted_out_defaults_to_todo() {
 
     let result = (|| -> anyhow::Result<_> {
         let mut ext = Extractor::new(
-            "app.py", None, false, None, false, false, None, false, false, false, None, false,
-            false, false,
+            "app.py",
+            None,
+            false,
+            None,
+            false,
+            false,
+            None,
+            false,
+            false,
+            false,
+            None,
+            false,
+            false,
+            false,
+            no_interrupt(),
         )?;
         ext.run()?;
         Ok(fs::read_to_string("TODO")?)
@@ -153,6 +168,7 @@ fn zero_token_file_empty_out() {
             false,
             false,
             false,
+            no_interrupt(),
         )
         .unwrap();
         ext.run().unwrap();
@@ -181,6 +197,7 @@ fn o_equals_scanned_file_truncates() {
         false,
         false,
         false,
+        no_interrupt(),
     )
     .unwrap();
     ext.run().unwrap();
@@ -211,6 +228,7 @@ fn zero_hit_scan_truncates_stale_out() {
         false,
         false,
         false,
+        no_interrupt(),
     )
     .unwrap();
     ext.run().unwrap();
@@ -238,6 +256,7 @@ fn missing_path_raises() {
         false,
         false,
         false,
+        no_interrupt(),
     ) {
         Err(e) => e,
         Ok(_) => panic!("expected missing path to fail in new"),
@@ -327,6 +346,7 @@ fn get_snippet_count_after_token() {
         false,
         false,
         false,
+        no_interrupt(),
     )
     .unwrap();
     for (line, expected) in [("# TODO: x", 1usize), ("# TODO{3} x", 3)] {
@@ -362,6 +382,7 @@ fn invalid_snippet_raises() {
                 false,
                 false,
                 false,
+                no_interrupt(),
             )
             .unwrap();
             let err = ext.run().unwrap_err();
@@ -474,6 +495,7 @@ fn symlink_path_raises_file() {
         false,
         false,
         false,
+        no_interrupt(),
     ) {
         Err(e) => e,
         Ok(_) => panic!("expected symlink path to fail in new"),
@@ -505,6 +527,7 @@ fn symlink_path_raises_dir() {
         false,
         false,
         false,
+        no_interrupt(),
     ) {
         Err(e) => e,
         Ok(_) => panic!("expected symlink path to fail in new"),
@@ -532,6 +555,7 @@ fn debug_emits_processing_trail() {
         false,
         false,
         true,
+        no_interrupt(),
     )
     .unwrap();
     ext.run().unwrap();
@@ -655,6 +679,7 @@ fn max_depth_rejects_non_positive() {
         false,
         false,
         false,
+        no_interrupt(),
     ) {
         Err(e) => e,
         Ok(_) => panic!("expected max_depth 0 to fail"),
@@ -684,6 +709,7 @@ fn max_depth_none_uses_default() {
         false,
         false,
         false,
+        no_interrupt(),
     )
     .unwrap();
     assert_eq!(ext.max_depth, DEFAULT_MAX_DEPTH);
@@ -801,6 +827,7 @@ fn does_not_rescan_output_file() {
         false,
         false,
         false,
+        no_interrupt(),
     )
     .unwrap();
     ext.run().unwrap();
@@ -948,6 +975,7 @@ fn exclude_spec_defaults_bang_and_comments() {
         false,
         false,
         false,
+        no_interrupt(),
     )
     .unwrap();
     let spec = &ext.exclude_spec;
@@ -994,6 +1022,7 @@ fn file_path_g_is_noop_but_still_processes() {
         false,
         false,
         false,
+        no_interrupt(),
     )
     .unwrap();
     // gitignore not loaded for file root (vendor/ from testdata .gitignore absent)

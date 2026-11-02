@@ -169,7 +169,26 @@ fn tee_via_cli() {
 }
 
 #[test]
-fn s_broken_pipe_exits_nonzero() {
+fn missing_path_exits_nonzero() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = tdx()
+        .args([
+            dir.path().join("nope").to_str().unwrap(),
+            "-o",
+            dir.path().join("x").to_str().unwrap(),
+        ])
+        .output()
+        .expect("run tdx");
+    assert_eq!(output.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        err.starts_with("tdx: error:") && err.contains("not found"),
+        "err={err}"
+    );
+}
+
+#[test]
+fn s_broken_pipe_exits_zero() {
     for extra in [vec!["-s"], vec!["-s", "-d"]] {
         let dir = tempfile::tempdir().unwrap();
         // many hits so writes continue after the reader closes (small out fits in the pipe buffer)
@@ -195,12 +214,55 @@ fn s_broken_pipe_exits_nonzero() {
             // drop stdout -> broken pipe for later writes
         }
         let output = child.wait_with_output().expect("wait tdx");
-        // silent like Python; exit 1 (Python used 141)
-        assert_eq!(output.status.code(), Some(1), "args={args:?}");
+        // silent like Python; exit 0 rg-style (Python used 141)
+        assert_eq!(output.status.code(), Some(0), "args={args:?}");
         assert!(
             output.stderr.is_empty(),
             "stderr should be quiet on broken pipe, got={}",
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+#[test]
+fn keyboard_interrupt_exits_130() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("out.txt");
+    // enough files that SIGINT can land mid-walk (stdout discarded so writes do not block)
+    for i in 0..3000 {
+        std::fs::write(
+            dir.path().join(format!("f{i}.py")),
+            format!("# TODO: item-{i}\n"),
+        )
+        .unwrap();
+    }
+    let child = tdx()
+        .args([
+            dir.path().to_str().unwrap(),
+            "-o",
+            out.to_str().unwrap(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn tdx");
+    let pid = child.id();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let kill = Command::new("kill")
+        .args(["-INT", &pid.to_string()])
+        .status()
+        .expect("kill -INT");
+    assert!(kill.success(), "kill -INT failed");
+    let output = child.wait_with_output().expect("wait tdx");
+    assert_eq!(
+        output.status.code(),
+        Some(130),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "stderr should be quiet on interrupt, got={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
