@@ -4,7 +4,7 @@ use std::{
     collections::HashSet,
     fs::{self, File},
     io::{BufRead, BufReader},
-    path::{Path, PathBuf},
+    path::{Path, PathBuf, absolute},
     sync::{Arc, atomic::AtomicBool},
 };
 
@@ -341,7 +341,7 @@ impl Extractor {
     fn prepare_path_name(&self, path: &Path) -> String {
         //??can we improve this
         if self.full_path {
-            std::path::absolute(path)
+            absolute(path)
                 .unwrap_or_else(|_| path.to_path_buf())
                 .display()
                 .to_string()
@@ -396,8 +396,8 @@ impl Extractor {
         if self
             .out
             .path()
-            .and_then(|out| out.canonicalize().ok())
-            .is_some_and(|out| Some(out) == path.canonicalize().ok())
+            .and_then(|out| absolute(out).ok())
+            .is_some_and(|out| Some(out) == absolute(path).ok())
         {
             return true;
         }
