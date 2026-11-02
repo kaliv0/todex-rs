@@ -166,11 +166,6 @@ enum StdoutSink {
 }
 
 fn resolve_pager_cmd() -> Option<String> {
-    //??fix this
-    #[cfg(test)]
-    if let Some(cmd) = tests::pager_override() {
-        return Some(cmd);
-    }
     env::var("MANPAGER")
         .or_else(|_| env::var("PAGER"))
         .ok()
@@ -207,23 +202,35 @@ fn page(text: &str) -> Result<()> {
     }
 }
 
+////////////////////////////////////
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{cell::RefCell, fs};
+    use std::{fs, sync::Mutex};
 
-    thread_local! {
-        static PAGER_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
-    }
-
-    pub(super) fn pager_override() -> Option<String> {
-        PAGER_OVERRIDE.with(|c| c.borrow().clone())
-    }
+    static PAGER_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn with_pager<T>(cmd: &str, f: impl FnOnce() -> T) -> T {
-        PAGER_OVERRIDE.with(|c| *c.borrow_mut() = Some(cmd.to_string()));
+        let _guard = PAGER_ENV_LOCK.lock().unwrap();
+        let prev_man = env::var("MANPAGER").ok();
+        let prev_pager = env::var("PAGER").ok();
+        // edition 2024: set_var / remove_var are unsafe
+        unsafe {
+            env::set_var("MANPAGER", cmd);
+            env::remove_var("PAGER");
+        }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-        PAGER_OVERRIDE.with(|c| *c.borrow_mut() = None);
+        unsafe {
+            match prev_man {
+                Some(v) => env::set_var("MANPAGER", v),
+                None => env::remove_var("MANPAGER"),
+            }
+            match prev_pager {
+                Some(v) => env::set_var("PAGER", v),
+                None => env::remove_var("PAGER"),
+            }
+        }
         match result {
             Ok(v) => v,
             Err(e) => std::panic::resume_unwind(e),

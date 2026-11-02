@@ -237,11 +237,7 @@ fn keyboard_interrupt_exits_130() {
         .unwrap();
     }
     let child = tdx()
-        .args([
-            dir.path().to_str().unwrap(),
-            "-o",
-            out.to_str().unwrap(),
-        ])
+        .args([dir.path().to_str().unwrap(), "-o", out.to_str().unwrap()])
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()

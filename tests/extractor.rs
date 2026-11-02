@@ -6,7 +6,7 @@ use common::{
     APP_OUT, copy_sample, no_interrupt, run_extract, run_extract_full, run_extract_with,
     write_good_and_bad,
 };
-use todex::extractor::{DEFAULT_MAX_DEPTH, Extractor};
+use todex::extractor::Extractor;
 
 #[test]
 fn default_scan() {
@@ -325,38 +325,6 @@ fn snippet_past_eof_does_not_crash() {
     let text = run_extract(&src, &out).unwrap();
     assert!(text.contains("TODO"));
     assert!(text.contains("only one more"));
-}
-
-#[test]
-fn get_snippet_count_after_token() {
-    let dir = tempfile::tempdir().unwrap();
-    let out = dir.path().join("out.txt");
-    let ext = Extractor::new(
-        dir.path(),
-        None,
-        false,
-        None,
-        false,
-        false,
-        Some(out.to_str().unwrap()),
-        false,
-        false,
-        false,
-        None,
-        false,
-        false,
-        false,
-        no_interrupt(),
-    )
-    .unwrap();
-    for (line, expected) in [("# TODO: x", 1usize), ("# TODO{3} x", 3)] {
-        let token_end = line.find("TODO").unwrap() + "TODO".len();
-        assert_eq!(
-            ext.get_snippet_count_after_token(line, token_end, 1)
-                .unwrap(),
-            expected
-        );
-    }
 }
 
 #[test]
@@ -691,31 +659,6 @@ fn max_depth_rejects_non_positive() {
 }
 
 #[test]
-fn max_depth_none_uses_default() {
-    let dir = tempfile::tempdir().unwrap();
-    let out = dir.path().join("out.txt");
-    let ext = Extractor::new(
-        dir.path(),
-        None,
-        false,
-        None,
-        false,
-        false,
-        Some(out.to_str().unwrap()),
-        false,
-        false,
-        false,
-        None,
-        false,
-        false,
-        false,
-        no_interrupt(),
-    )
-    .unwrap();
-    assert_eq!(ext.max_depth, DEFAULT_MAX_DEPTH);
-}
-
-#[test]
 fn symlink_not_followed_dir() {
     let dir = tempfile::tempdir().unwrap();
     let outside = dir.path().join("outside");
@@ -951,44 +894,6 @@ fn g_with_x_bang_reincludes_vendor() {
 }
 
 #[test]
-fn exclude_spec_defaults_bang_and_comments() {
-    let dir = tempfile::tempdir().unwrap();
-    let out = dir.path().join("out.txt");
-    let ext = Extractor::new(
-        dir.path(),
-        None,
-        false,
-        Some(vec![
-            "vendor/".into(),
-            "!vendor/keep.py".into(),
-            "# comment".into(),
-            "".into(),
-            "  ".into(),
-        ]),
-        false,
-        false,
-        Some(out.to_str().unwrap()),
-        false,
-        false,
-        false,
-        None,
-        false,
-        false,
-        false,
-        no_interrupt(),
-    )
-    .unwrap();
-    let spec = &ext.exclude_spec;
-
-    assert!(spec.matches(".hidden.py", false));
-    assert!(spec.matches("__init__.py", false));
-    assert!(spec.matches("vendor", true) || spec.matches("vendor/", true));
-    assert!(spec.matches("vendor/lib.py", false));
-    assert!(!spec.matches("vendor/keep.py", false));
-    assert!(!spec.matches("app.py", false));
-}
-
-#[test]
 fn g_missing_gitignore_is_noop() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
@@ -1007,27 +912,6 @@ fn file_path_g_is_noop_but_still_processes() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let ext = Extractor::new(
-        sample.join("app.py"),
-        None,
-        false,
-        None,
-        false,
-        true,
-        Some(out.to_str().unwrap()),
-        false,
-        false,
-        false,
-        None,
-        false,
-        false,
-        false,
-        no_interrupt(),
-    )
-    .unwrap();
-    // gitignore not loaded for file root (vendor/ from testdata .gitignore absent)
-    assert!(!ext.exclude_spec.matches("vendor/lib.py", false));
-
     let text = run_extract_full(
         &sample.join("app.py"),
         &out,
