@@ -13,10 +13,7 @@ fn main() {
         Ok(()) => {}
         Err(e) if e.is_interrupted() => std::process::exit(130),
         Err(e) if e.is_pipe_stop() => std::process::exit(0), // 0 rg-style or 141 Unix-style
-        Err(e) => {
-            eprintln!("{PROG}: error: {e}");
-            std::process::exit(1);
-        }
+        Err(e) => die(e),
     }
 }
 
@@ -59,7 +56,7 @@ fn run() -> Result<()> {
     extractor.run(&mut writer)
 }
 
-fn die(msg: &str) -> ! {
+fn die(msg: impl std::fmt::Display) -> ! {
     eprintln!("{PROG}: error: {msg}");
     std::process::exit(1);
 }
