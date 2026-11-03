@@ -241,7 +241,8 @@ impl Extractor {
             header_added = true;
         }
 
-        let snippet_count = self.get_snippet_count_after_token(line, token_end, lines_count)?;
+        let snippet_count =
+            self.get_snippet_count_after_token(display_name, line, token_end, lines_count)?;
         if self.concise {
             writer.write_entry(lines_count, &line[token_start..])?;
             return Ok((lines_count, header_added));
@@ -280,6 +281,7 @@ impl Extractor {
 
     fn get_snippet_count_after_token(
         &self,
+        display_name: &str,
         line: &str,
         token_end: usize,
         line_num: usize,
@@ -292,6 +294,7 @@ impl Extractor {
         let Some((body, _)) = body.split_once('}') else {
             return Err(Error::InvalidSnippet(self.add_debug_note(
                 format!("{err_msg}: unclosed '{{'"),
+                display_name,
                 line,
                 line_num,
             )));
@@ -301,15 +304,28 @@ impl Extractor {
             Ok(n) => Ok(n),
             Err(_) => Err(Error::InvalidSnippet(self.add_debug_note(
                 format!("{err_msg}: {body:?}"),
+                display_name,
                 line,
                 line_num,
             ))),
         }
     }
 
-    fn add_debug_note(&self, msg: String, line: &str, line_num: usize) -> String {
+    fn add_debug_note(
+        &self,
+        msg: String,
+        display_name: &str,
+        line: &str,
+        line_num: usize,
+    ) -> String {
         if self.debug {
-            format!("{}\n\tline {}: {}", msg, line_num, line.trim())
+            format!(
+                "{}\n\tfile {}:\n\tline {}: {}",
+                msg,
+                display_name,
+                line_num,
+                line.trim()
+            )
         } else {
             msg
         }
@@ -538,7 +554,7 @@ mod tests {
         for (line, expected) in [("# TODO: x", 1usize), ("# TODO{3} x", 3)] {
             let token_end = line.find("TODO").unwrap() + "TODO".len();
             assert_eq!(
-                ext.get_snippet_count_after_token(line, token_end, 1)
+                ext.get_snippet_count_after_token("Myfile", line, token_end, 1)
                     .unwrap(),
                 expected
             );
