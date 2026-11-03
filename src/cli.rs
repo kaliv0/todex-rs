@@ -133,8 +133,6 @@ the extractor will include multiline snippet with the length specified between t
 }
 
 fn require_positive_int(s: &str) -> Result<usize, String> {
-    //??why not std::io::Result
-    // usize (u64) is too much for max_depth...
     match s.parse::<i64>() {
         Ok(num) if num > 0 => Ok(num as usize),
         Ok(num) => Err(format!("{num} must be positive")),

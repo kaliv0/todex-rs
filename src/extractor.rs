@@ -76,12 +76,17 @@ impl Extractor {
         Ok(root)
     }
 
-    fn prepare_token_pattern(mut tokens: Vec<String>, ignore_default: bool) -> Result<Regex> {
-        if !ignore_default {
-            // prepend defaults to user-passed tokens
-            //?? what if we use VecDeque to prepend?
-            tokens.splice(0..0, DEFAULT_TOKENS.map(str::to_string));
-        }
+    fn prepare_token_pattern(tokens: Vec<String>, ignore_default: bool) -> Result<Regex> {
+        let mut tokens = if ignore_default {
+            tokens
+        } else {
+            DEFAULT_TOKENS
+                .map(str::to_string)
+                .into_iter()
+                .chain(tokens)
+                .collect()
+        };
+
         if tokens.is_empty() {
             // prevented by CLI (-i without -t) but you can never be too careful
             return Err(Error::NoTokens);
@@ -109,23 +114,25 @@ impl Extractor {
 
     fn prepare_exclude_spec(
         root: &Path,
-        mut exclude: Vec<String>,
+        exclude: Vec<String>,
         include_hidden: bool,
         use_gitignore: bool,
     ) -> Result<ExcludeSpec> {
-        if use_gitignore && root.is_dir() {
-            //?? what if we use VecDeque to prepend?
-            exclude.splice(0..0, Self::get_gitignore_patterns(root)?);
-        }
+        let mut exclude = if use_gitignore && root.is_dir() {
+            Self::get_gitignore_patterns(root)?
+                .into_iter()
+                .chain(exclude)
+                .collect::<Vec<String>>()
+        } else {
+            exclude
+        };
 
         if !include_hidden {
-            exclude.splice(
-                0..0,
-                DEFAULT_GLOBS
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>(),
-            );
+            exclude = DEFAULT_GLOBS
+                .map(str::to_string)
+                .into_iter()
+                .chain(exclude)
+                .collect();
         }
         Self::dedup(&mut exclude);
         ExcludeSpec::from_lines(&exclude)
