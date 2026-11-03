@@ -1,4 +1,3 @@
-use anyhow::Result;
 use std::{
     fs::File,
     io::{self, BufWriter, IsTerminal, Write},
@@ -10,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    error::{InterruptedError, StopExtractionError},
+    error::{Error, Result},
     pager::{StdoutSink, page},
 };
 
@@ -84,7 +83,7 @@ impl Writer {
 
     fn write(&mut self, text: &str) -> Result<()> {
         if self.interrupted() {
-            return Err(InterruptedError.into());
+            return Err(Error::Interrupted);
         }
 
         if self.to_stdout {
@@ -110,7 +109,7 @@ impl Writer {
                     self.stdout = StdoutSink::None;
                 }
                 if self.path.is_none() {
-                    return Err(StopExtractionError.into());
+                    return Err(Error::StopExtraction);
                 }
             }
         }

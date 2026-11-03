@@ -7,7 +7,7 @@ use std::{fs, io};
 
 use std::sync::{Arc, atomic::AtomicBool};
 
-use anyhow::Result;
+use todex::error::Result;
 use todex::extractor::Extractor;
 
 pub fn no_interrupt() -> Arc<AtomicBool> {

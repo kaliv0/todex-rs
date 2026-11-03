@@ -120,7 +120,7 @@ fn omitted_out_defaults_to_todo() {
     let prev = std::env::current_dir().unwrap();
     std::env::set_current_dir(&sample).unwrap();
 
-    let result = (|| -> anyhow::Result<_> {
+    let result = (|| -> todex::error::Result<_> {
         let mut ext = Extractor::new(
             "app.py",
             None,

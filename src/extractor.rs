@@ -1,4 +1,3 @@
-use anyhow::{Result, bail};
 use fancy_regex::Regex;
 use std::{
     collections::HashSet,
@@ -8,7 +7,11 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
 };
 
-use crate::{error::InterruptedError, exclude::ExcludeSpec, writer::Writer};
+use crate::{
+    error::{Error, Result},
+    exclude::ExcludeSpec,
+    writer::Writer,
+};
 
 pub const DEFAULT_MAX_DEPTH: usize = 120;
 pub const DEFAULT_OUT: &str = "TODO";
@@ -73,10 +76,10 @@ impl Extractor {
     fn prepare_root(path: impl AsRef<Path>) -> Result<PathBuf> {
         let root = path.as_ref().to_path_buf();
         if root.is_symlink() {
-            bail!("{} is a symlink", root.display());
+            return Err(Error::Symlink(root));
         }
         if !root.exists() {
-            bail!("{} not found", root.display());
+            return Err(Error::NotFound(root));
         }
         Ok(root)
     }
@@ -89,7 +92,7 @@ impl Extractor {
         }
         if tokens.is_empty() {
             // prevented by CLI (-i without -t) but you can never be too careful
-            bail!("no tokens to search for");
+            return Err(Error::NoTokens);
         }
 
         // dedup() removes only consecutive duplicates
@@ -127,7 +130,7 @@ impl Extractor {
     fn prepare_max_depth(max_depth: Option<usize>) -> Result<usize> {
         match max_depth {
             None => Ok(DEFAULT_MAX_DEPTH),
-            Some(0) => bail!("max_depth must be a positive integer"),
+            Some(0) => Err(Error::InvalidMaxDepth),
             Some(n) => Ok(n),
         }
     }
@@ -178,7 +181,7 @@ impl Extractor {
             } else if self.root.is_dir() {
                 self.process_dir(&self.root.clone(), 0)
             } else {
-                bail!("{} must be path to file or dir", self.root.display());
+                Err(Error::NotFileOrDir(self.root.clone()))
             }
         })();
 
@@ -188,7 +191,7 @@ impl Extractor {
 
     fn process_file(&mut self, path: &Path) -> Result<()> {
         if self.out.interrupted() {
-            return Err(InterruptedError.into());
+            return Err(Error::Interrupted);
         }
         if self.is_excluded(path, false) {
             return Ok(());
@@ -234,10 +237,7 @@ impl Extractor {
             }
             Ok(())
         })() {
-            Err(e)
-                if e.downcast_ref::<std::io::Error>()
-                    .is_some_and(|ioe| ioe.kind() == std::io::ErrorKind::InvalidData) =>
-            {
+            Err(e) if e.is_invalid_data() => {
                 if self.debug {
                     self.out
                         .error(&format!("skipping {display_name}:\n{e}\n"))?;
@@ -312,18 +312,20 @@ impl Extractor {
 
         let err_msg = "invalid snippet count";
         let Some((body, _)) = body.split_once('}') else {
-            bail!(
-                "{}",
-                self.add_debug_note(format!("{err_msg}: unclosed '{{'"), line, line_num)
-            );
+            return Err(Error::InvalidSnippet(self.add_debug_note(
+                format!("{err_msg}: unclosed '{{'"),
+                line,
+                line_num,
+            )));
         };
 
         match body.parse::<usize>() {
             Ok(n) => Ok(n),
-            Err(_) => bail!(
-                "{}",
-                self.add_debug_note(format!("{err_msg}: {body:?}"), line, line_num)
-            ),
+            Err(_) => Err(Error::InvalidSnippet(self.add_debug_note(
+                format!("{err_msg}: {body:?}"),
+                line,
+                line_num,
+            ))),
         }
     }
 
@@ -353,7 +355,7 @@ impl Extractor {
 
     fn process_dir(&mut self, path: &Path, depth: usize) -> Result<()> {
         if self.out.interrupted() {
-            return Err(InterruptedError.into());
+            return Err(Error::Interrupted);
         }
         if self.is_excluded(path, true) || depth > self.max_depth {
             return Ok(());

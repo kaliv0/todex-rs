@@ -1,9 +1,10 @@
-use anyhow::Result;
 use std::{
     env, io,
     io::Write,
     process::{Command, Stdio},
 };
+
+use crate::error::Result;
 
 pub enum StdoutSink {
     None,
