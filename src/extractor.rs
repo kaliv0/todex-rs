@@ -1,10 +1,10 @@
 use fancy_regex::Regex;
 use std::{
+    borrow::Cow,
     collections::HashSet,
     fs::{self, File},
     io::{BufRead, BufReader},
     path::{Path, PathBuf, absolute},
-    sync::{Arc, atomic::AtomicBool},
 };
 
 use crate::{
@@ -14,7 +14,6 @@ use crate::{
 };
 
 pub const DEFAULT_MAX_DEPTH: usize = 120;
-pub const DEFAULT_OUT: &str = "TODO";
 pub const DEFAULT_TOKENS: [&str; 2] = ["TODO", "FIXME"];
 pub const DEFAULT_GLOBS: [&str; 2] = [".*", "__*"];
 
@@ -22,7 +21,6 @@ pub struct Extractor {
     root: PathBuf,
     token_pattern: Regex,
     exclude_spec: ExcludeSpec,
-    out: Writer,
     full_path: bool,
     concise: bool,
     recursive: bool,
@@ -38,15 +36,11 @@ impl Extractor {
         exclude: Option<Vec<String>>,
         include_hidden: bool,
         use_gitignore: bool,
-        out: Option<&str>,
         full_path: bool,
         concise: bool,
         recursive: bool,
         max_depth: Option<usize>,
-        stdout: bool,
-        tee: bool,
         debug: bool,
-        interrupted: Arc<AtomicBool>,
     ) -> Result<Self> {
         let root = Self::prepare_root(path)?;
         let token_pattern =
@@ -58,13 +52,11 @@ impl Extractor {
             use_gitignore,
         )?;
         let max_depth = Self::prepare_max_depth(max_depth)?;
-        let out = Self::prepare_out_writer(out.unwrap_or(DEFAULT_OUT), stdout, tee, interrupted)?;
 
         Ok(Self {
             root,
             token_pattern,
             exclude_spec,
-            out,
             full_path,
             concise,
             recursive,
@@ -95,11 +87,8 @@ impl Extractor {
             return Err(Error::NoTokens);
         }
 
-        // dedup() removes only consecutive duplicates
-        // -> even after sorting it might be have same-length token sitting between copies
-        let mut seen = HashSet::new();
-        tokens.retain(|t| seen.insert(t.clone()));
-        tokens.sort_by_key(|t| std::cmp::Reverse(t.len()));
+        Self::dedup(&mut tokens);
+        tokens.sort_unstable_by_key(|t| std::cmp::Reverse(t.len()));
         let alternations = tokens
             .iter()
             .map(|t| fancy_regex::escape(t))
@@ -108,23 +97,6 @@ impl Extractor {
 
         let pattern = format!(r"(?i)(?<!\w)(?:{alternations})(?!\w)");
         Ok(Regex::new(&pattern).expect("failed to compile token pattern"))
-    }
-
-    fn prepare_out_writer(
-        name: &str,
-        stdout: bool,
-        tee: bool,
-        interrupted: Arc<AtomicBool>,
-    ) -> Result<Writer> {
-        if stdout {
-            return Writer::new(None, true, interrupted);
-        }
-
-        let mut path = PathBuf::from(name);
-        if path.is_dir() {
-            path = path.join(DEFAULT_OUT);
-        }
-        Writer::new(Some(path), tee, interrupted)
     }
 
     fn prepare_max_depth(max_depth: Option<usize>) -> Result<usize> {
@@ -155,9 +127,7 @@ impl Extractor {
                     .collect::<Vec<_>>(),
             );
         }
-        //??extract dedup() helper
-        let mut seen = HashSet::new();
-        exclude.retain(|p| seen.insert(p.clone()));
+        Self::dedup(&mut exclude);
         ExcludeSpec::from_lines(&exclude)
     }
 
@@ -170,36 +140,36 @@ impl Extractor {
         Ok(text.lines().map(str::to_string).collect())
     }
 
-    pub fn run(&mut self) -> Result<()> {
+    pub fn run(&self, writer: &mut Writer) -> Result<()> {
         let walk = (|| -> Result<()> {
             if self.debug {
-                self.out.debug("processing:\n")?;
+                writer.debug("processing:\n")?;
             }
 
             if self.root.is_file() {
-                self.process_file(&self.root.clone())
+                self.process_file(&self.root, writer)
             } else if self.root.is_dir() {
-                self.process_dir(&self.root.clone(), 0)
+                self.process_dir(&self.root, 0, writer)
             } else {
                 Err(Error::NotFileOrDir(self.root.clone()))
             }
         })();
 
-        self.out.close()?; // always flush out_file
+        writer.close()?; // always flush out_file
         walk
     }
 
-    fn process_file(&mut self, path: &Path) -> Result<()> {
-        if self.out.interrupted() {
+    fn process_file(&self, path: &Path, writer: &mut Writer) -> Result<()> {
+        if writer.interrupted() {
             return Err(Error::Interrupted);
         }
-        if self.is_excluded(path, false) {
+        if self.is_excluded(path, false, writer) {
             return Ok(());
         }
 
         let display_name = self.prepare_path_name(path);
         if self.debug {
-            self.out.debug(&format!("\t{display_name}\n"))?;
+            writer.debug(&format!("\t{display_name}\n"))?;
         }
 
         let file = File::open(path)?;
@@ -226,6 +196,7 @@ impl Extractor {
                 };
 
                 (lines_count, header_added) = self.write_hit(
+                    writer,
                     &mut reader,
                     &display_name,
                     &line,
@@ -239,8 +210,7 @@ impl Extractor {
         })() {
             Err(e) if e.is_invalid_data() => {
                 if self.debug {
-                    self.out
-                        .error(&format!("skipping {display_name}:\n{e}\n"))?;
+                    writer.error(&format!("skipping {display_name}:\n{e}\n"))?;
                 }
                 Ok(())
             }
@@ -249,7 +219,8 @@ impl Extractor {
     }
 
     fn write_hit(
-        &mut self,
+        &self,
+        writer: &mut Writer,
         reader: &mut BufReader<File>,
         display_name: &str,
         line: &str,
@@ -259,13 +230,13 @@ impl Extractor {
         mut header_added: bool,
     ) -> Result<(usize, bool)> {
         if !header_added {
-            self.out.write_header(display_name)?;
+            writer.write_header(display_name)?;
             header_added = true;
         }
 
         let snippet_count = self.get_snippet_count_after_token(line, token_end, lines_count)?;
         if self.concise {
-            self.out.write_entry(lines_count, &line[token_start..])?;
+            writer.write_entry(lines_count, &line[token_start..])?;
             return Ok((lines_count, header_added));
         }
 
@@ -282,15 +253,15 @@ impl Extractor {
         }
 
         let entry = Self::format_snippet_entry(&snippet, display_line_num != lines_count);
-        self.out.write_entry(display_line_num, &entry)?;
+        writer.write_entry(display_line_num, &entry)?;
         Ok((lines_count, header_added))
     }
 
     fn format_snippet_entry(line: &str, multi: bool) -> String {
-        let line = if line.ends_with('\n') {
-            line.to_string() //?? unnecessary copy
+        let line: Cow<'_, str> = if line.ends_with('\n') {
+            Cow::Borrowed(line)
         } else {
-            format!("{line}\n") // this is the last line of the file
+            Cow::Owned(format!("{line}\n")) // this is the last line of the file
         };
 
         if multi {
@@ -338,7 +309,6 @@ impl Extractor {
     }
 
     fn prepare_path_name(&self, path: &Path) -> String {
-        //??can we improve this
         if self.full_path {
             absolute(path)
                 .unwrap_or_else(|_| path.to_path_buf())
@@ -353,11 +323,11 @@ impl Extractor {
         }
     }
 
-    fn process_dir(&mut self, path: &Path, depth: usize) -> Result<()> {
-        if self.out.interrupted() {
+    fn process_dir(&self, path: &Path, depth: usize, writer: &mut Writer) -> Result<()> {
+        if writer.interrupted() {
             return Err(Error::Interrupted);
         }
-        if self.is_excluded(path, true) || depth > self.max_depth {
+        if self.is_excluded(path, true, writer) || depth > self.max_depth {
             return Ok(());
         }
 
@@ -374,29 +344,28 @@ impl Extractor {
             };
             // metadata() doesn't follow symlinks
             if meta.is_file() {
-                self.process_file(&entry.path())?;
+                self.process_file(&entry.path(), writer)?;
             } else if self.recursive && meta.is_dir() {
                 dirs.push(entry.path());
             }
         }
 
         for dir in dirs {
-            self.process_dir(&dir, depth + 1)?;
+            self.process_dir(&dir, depth + 1, writer)?;
         }
         Ok(())
     }
 
-    fn is_excluded(&self, path: &Path, is_dir: bool) -> bool {
+    fn is_excluded(&self, path: &Path, is_dir: bool, writer: &Writer) -> bool {
         // always process scan root
         if path == self.root {
             return false;
         }
         //skip summary file
-        if self
-            .out
+        if writer
             .path()
-            .and_then(|out| absolute(out).ok())
-            .is_some_and(|out| Some(out) == absolute(path).ok())
+            .and_then(|p| absolute(p).ok())
+            .is_some_and(|p| Some(p) == absolute(path).ok())
         {
             return true;
         }
@@ -406,6 +375,11 @@ impl Extractor {
         };
         self.exclude_spec.matches(&rel.to_string_lossy(), is_dir)
     }
+
+    fn dedup(items: &mut Vec<String>) {
+        let mut seen = HashSet::new();
+        items.retain(|i| seen.insert(i.clone()));
+    }
 }
 
 ////////////////////////////////////
@@ -413,10 +387,6 @@ impl Extractor {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn no_interrupt() -> Arc<AtomicBool> {
-        Arc::new(AtomicBool::new(false))
-    }
 
     fn matched(tokens: &[&str], ignore_default: bool, line: &str) -> Option<String> {
         let tokens = tokens.iter().map(|t| (*t).to_string()).collect();
@@ -544,7 +514,6 @@ mod tests {
     #[test]
     fn get_snippet_count_after_token() {
         let dir = tempfile::tempdir().unwrap();
-        let out = dir.path().join("out.txt");
         let ext = Extractor::new(
             dir.path(),
             None,
@@ -552,15 +521,11 @@ mod tests {
             None,
             false,
             false,
-            Some(out.to_str().unwrap()),
             false,
             false,
             false,
             None,
             false,
-            false,
-            false,
-            no_interrupt(),
         )
         .unwrap();
         for (line, expected) in [("# TODO: x", 1usize), ("# TODO{3} x", 3)] {
@@ -576,7 +541,6 @@ mod tests {
     #[test]
     fn max_depth_none_uses_default() {
         let dir = tempfile::tempdir().unwrap();
-        let out = dir.path().join("out.txt");
         let ext = Extractor::new(
             dir.path(),
             None,
@@ -584,15 +548,11 @@ mod tests {
             None,
             false,
             false,
-            Some(out.to_str().unwrap()),
             false,
             false,
             false,
             None,
             false,
-            false,
-            false,
-            no_interrupt(),
         )
         .unwrap();
         assert_eq!(ext.max_depth, DEFAULT_MAX_DEPTH);
@@ -601,7 +561,6 @@ mod tests {
     #[test]
     fn exclude_spec_defaults_bang_and_comments() {
         let dir = tempfile::tempdir().unwrap();
-        let out = dir.path().join("out.txt");
         let ext = Extractor::new(
             dir.path(),
             None,
@@ -615,15 +574,11 @@ mod tests {
             ]),
             false,
             false,
-            Some(out.to_str().unwrap()),
             false,
             false,
             false,
             None,
             false,
-            false,
-            false,
-            no_interrupt(),
         )
         .unwrap();
         let spec = &ext.exclude_spec;
@@ -643,23 +598,8 @@ mod tests {
         fs::write(&file, "# TODO: x\n").unwrap();
         let gitignore = dir.path().join(".gitignore");
         fs::write(&gitignore, "vendor/\n").unwrap();
-        let out = dir.path().join("out.txt");
         let ext = Extractor::new(
-            &file,
-            None,
-            false,
-            None,
-            false,
-            true,
-            Some(out.to_str().unwrap()),
-            false,
-            false,
-            false,
-            None,
-            false,
-            false,
-            false,
-            no_interrupt(),
+            &file, None, false, None, false, true, false, false, false, None, false,
         )
         .unwrap();
         assert!(!ext.exclude_spec.matches("vendor/lib.py", false));

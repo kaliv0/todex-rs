@@ -13,6 +13,8 @@ use crate::{
     pager::{StdoutSink, page},
 };
 
+pub const DEFAULT_OUT: &str = "TODO";
+
 pub struct Writer {
     path: Option<PathBuf>,
     to_stdout: bool,
@@ -23,6 +25,23 @@ pub struct Writer {
 
 impl Writer {
     pub fn new(
+        name: Option<&str>,
+        stdout: bool,
+        tee: bool,
+        interrupted: Arc<AtomicBool>,
+    ) -> Result<Self> {
+        if stdout {
+            return Self::create(None, true, interrupted);
+        }
+
+        let mut path = PathBuf::from(name.unwrap_or(DEFAULT_OUT));
+        if path.is_dir() {
+            path = path.join(DEFAULT_OUT);
+        }
+        Self::create(Some(path), tee, interrupted)
+    }
+
+    fn create(
         path: Option<PathBuf>,
         to_stdout: bool,
         interrupted: Arc<AtomicBool>,
@@ -133,6 +152,8 @@ impl Writer {
     }
 }
 
+////////////////////////////////////
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,7 +196,8 @@ mod tests {
         Arc::new(AtomicBool::new(false))
     }
 
-    fn paged_writer(path: Option<PathBuf>) -> Writer {
+    fn paged_writer(path: Option<&Path>) -> Writer {
+        let path = path.map(|p| p.to_path_buf());
         let file = path
             .as_ref()
             .map(|p| BufWriter::new(File::create(p).unwrap()));
@@ -193,7 +215,7 @@ mod tests {
         if io::stdout().is_terminal() {
             return;
         }
-        let w = Writer::new(None, true, no_interrupt()).unwrap();
+        let w = Writer::new(None, true, false, no_interrupt()).unwrap();
         assert!(matches!(w.stdout, StdoutSink::Raw));
     }
 
@@ -232,7 +254,7 @@ mod tests {
         if io::stdout().is_terminal() {
             return;
         }
-        let mut w = Writer::new(None, true, no_interrupt()).unwrap();
+        let mut w = Writer::new(None, true, false, no_interrupt()).unwrap();
         w.error("boom\n").unwrap();
     }
 
@@ -242,7 +264,7 @@ mod tests {
         let log = dir.path().join("paged.txt");
         let out = dir.path().join("out.txt");
         with_pager(&pager_to_file(&log), || {
-            let mut w = paged_writer(Some(out.clone()));
+            let mut w = paged_writer(Some(&out));
             w.write_entry(1, "# TODO: x\n").unwrap();
             w.close().unwrap();
 

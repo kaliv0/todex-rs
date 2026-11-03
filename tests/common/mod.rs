@@ -9,6 +9,7 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 use todex::error::Result;
 use todex::extractor::Extractor;
+use todex::writer::Writer;
 
 pub fn no_interrupt() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))
@@ -75,24 +76,21 @@ pub fn run_extract_full(
     recursive: bool,
     max_depth: Option<usize>,
 ) -> Result<String> {
-    let mut ext = Extractor::new(
+    let ext = Extractor::new(
         path,
         tokens,
         ignore_default,
         exclude,
         include_hidden,
         use_gitignore,
-        Some(out.to_str().unwrap()),
         full_path,
         concise,
         recursive,
         max_depth,
         false,
-        false,
-        false,
-        no_interrupt(),
     )?;
-    ext.run()?;
+    let mut writer = Writer::new(Some(out.to_str().unwrap()), false, false, no_interrupt())?;
+    ext.run(&mut writer)?;
     if out.is_file() {
         Ok(fs::read_to_string(out)?)
     } else {

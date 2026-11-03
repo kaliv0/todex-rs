@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use clap::Parser;
-use todex::{cli::Cli, error::Result, extractor::Extractor};
+use todex::{cli::Cli, error::Result, extractor::Extractor, writer::Writer};
 
 const PROG: &str = env!("CARGO_BIN_NAME");
 
@@ -40,25 +40,23 @@ fn run() -> Result<()> {
         flag.store(true, Ordering::SeqCst);
     })?;
 
-    let mut extractor = Extractor::new(
+    let extractor = Extractor::new(
         &cli.path,
         cli.tokens,
         cli.ignore_default,
         cli.exclude,
         cli.include_hidden,
         cli.use_gitignore,
-        cli.out.as_deref(),
         cli.full_path,
         cli.concise,
         cli.recursive,
         cli.max_depth,
-        cli.stdout,
-        cli.tee,
         cli.debug,
-        interrupted,
     )?;
 
-    extractor.run()
+    let mut writer = Writer::new(cli.out.as_deref(), cli.stdout, cli.tee, interrupted)?;
+
+    extractor.run(&mut writer)
 }
 
 fn die(msg: &str) -> ! {

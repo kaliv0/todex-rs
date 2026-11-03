@@ -7,6 +7,7 @@ use common::{
     write_good_and_bad,
 };
 use todex::extractor::Extractor;
+use todex::writer::Writer;
 
 #[test]
 fn default_scan() {
@@ -90,25 +91,28 @@ fn o_dir_writes_todo_inside() {
     let reports = sample.join("reports");
     fs::create_dir(&reports).unwrap();
 
-    let mut ext = Extractor::new(
+    let ext = Extractor::new(
         sample.join("app.py"),
         None,
         false,
         None,
         false,
         false,
-        Some(reports.to_str().unwrap()),
         false,
         false,
         false,
         None,
         false,
+    )
+    .unwrap();
+    let mut writer = Writer::new(
+        Some(reports.to_str().unwrap()),
         false,
         false,
         no_interrupt(),
     )
     .unwrap();
-    ext.run().unwrap();
+    ext.run(&mut writer).unwrap();
 
     assert_eq!(fs::read_to_string(reports.join("TODO")).unwrap(), APP_OUT);
 }
@@ -121,24 +125,11 @@ fn omitted_out_defaults_to_todo() {
     std::env::set_current_dir(&sample).unwrap();
 
     let result = (|| -> todex::error::Result<_> {
-        let mut ext = Extractor::new(
-            "app.py",
-            None,
-            false,
-            None,
-            false,
-            false,
-            None,
-            false,
-            false,
-            false,
-            None,
-            false,
-            false,
-            false,
-            no_interrupt(),
+        let ext = Extractor::new(
+            "app.py", None, false, None, false, false, false, false, false, None, false,
         )?;
-        ext.run()?;
+        let mut writer = Writer::new(None, false, false, no_interrupt())?;
+        ext.run(&mut writer)?;
         Ok(fs::read_to_string("TODO")?)
     })();
 
@@ -153,25 +144,13 @@ fn zero_token_file_empty_out() {
         let src = dir.path().join(name);
         let out = dir.path().join(format!("{name}.out"));
         fs::write(&src, content).unwrap();
-        let mut ext = Extractor::new(
-            &src,
-            None,
-            false,
-            None,
-            false,
-            false,
-            Some(out.to_str().unwrap()),
-            false,
-            false,
-            false,
-            None,
-            false,
-            false,
-            false,
-            no_interrupt(),
+        let ext = Extractor::new(
+            &src, None, false, None, false, false, false, false, false, None, false,
         )
         .unwrap();
-        ext.run().unwrap();
+        let mut writer =
+            Writer::new(Some(out.to_str().unwrap()), false, false, no_interrupt()).unwrap();
+        ext.run(&mut writer).unwrap();
         assert_eq!(fs::read_to_string(&out).unwrap(), "");
     }
 }
@@ -182,25 +161,13 @@ fn o_equals_scanned_file_truncates() {
     let src = dir.path().join("f.py");
     fs::write(&src, "# TODO: will be truncated\n").unwrap();
 
-    let mut ext = Extractor::new(
-        &src,
-        None,
-        false,
-        None,
-        false,
-        false,
-        Some(src.to_str().unwrap()),
-        false,
-        false,
-        false,
-        None,
-        false,
-        false,
-        false,
-        no_interrupt(),
+    let ext = Extractor::new(
+        &src, None, false, None, false, false, false, false, false, None, false,
     )
     .unwrap();
-    ext.run().unwrap();
+    let mut writer =
+        Writer::new(Some(src.to_str().unwrap()), false, false, no_interrupt()).unwrap();
+    ext.run(&mut writer).unwrap();
 
     assert_eq!(fs::read_to_string(&src).unwrap(), "");
 }
@@ -213,25 +180,13 @@ fn zero_hit_scan_truncates_stale_out() {
     fs::write(&src, "print(1)\n").unwrap();
     fs::write(&out, "stale from previous run\n").unwrap();
 
-    let mut ext = Extractor::new(
-        &src,
-        None,
-        false,
-        None,
-        false,
-        false,
-        Some(out.to_str().unwrap()),
-        false,
-        false,
-        false,
-        None,
-        false,
-        false,
-        false,
-        no_interrupt(),
+    let ext = Extractor::new(
+        &src, None, false, None, false, false, false, false, false, None, false,
     )
     .unwrap();
-    ext.run().unwrap();
+    let mut writer =
+        Writer::new(Some(out.to_str().unwrap()), false, false, no_interrupt()).unwrap();
+    ext.run(&mut writer).unwrap();
 
     assert_eq!(fs::read_to_string(&out).unwrap(), "");
 }
@@ -242,21 +197,7 @@ fn missing_path_raises() {
     let missing = dir.path().join("missing");
     let out = dir.path().join("out.txt");
     let err = match Extractor::new(
-        &missing,
-        None,
-        false,
-        None,
-        false,
-        false,
-        Some(out.to_str().unwrap()),
-        false,
-        false,
-        false,
-        None,
-        false,
-        false,
-        false,
-        no_interrupt(),
+        &missing, None, false, None, false, false, false, false, false, None, false,
     ) {
         Err(e) => e,
         Ok(_) => panic!("expected missing path to fail in new"),
@@ -335,25 +276,13 @@ fn invalid_snippet_raises() {
             let src = dir.path().join("bad.py");
             let out = dir.path().join("out.txt");
             fs::write(&src, content).unwrap();
-            let mut ext = Extractor::new(
-                &src,
-                None,
-                false,
-                None,
-                false,
-                false,
-                Some(out.to_str().unwrap()),
-                false,
-                concise,
-                false,
-                None,
-                false,
-                false,
-                false,
-                no_interrupt(),
+            let ext = Extractor::new(
+                &src, None, false, None, false, false, false, concise, false, None, false,
             )
             .unwrap();
-            let err = ext.run().unwrap_err();
+            let mut writer =
+                Writer::new(Some(out.to_str().unwrap()), false, false, no_interrupt()).unwrap();
+            let err = ext.run(&mut writer).unwrap_err();
             assert!(
                 err.to_string().contains("invalid snippet count"),
                 "err={err}"
@@ -447,23 +376,8 @@ fn symlink_path_raises_file() {
     fs::write(&target, "# TODO: x\n").unwrap();
     let link = dir.path().join("link.py");
     std::os::unix::fs::symlink(&target, &link).unwrap();
-    let out = dir.path().join("out.txt");
     let err = match Extractor::new(
-        &link,
-        None,
-        false,
-        None,
-        false,
-        false,
-        Some(out.to_str().unwrap()),
-        false,
-        false,
-        false,
-        None,
-        false,
-        false,
-        false,
-        no_interrupt(),
+        &link, None, false, None, false, false, false, false, false, None, false,
     ) {
         Err(e) => e,
         Ok(_) => panic!("expected symlink path to fail in new"),
@@ -479,23 +393,8 @@ fn symlink_path_raises_dir() {
     fs::write(target.join("x.py"), "# TODO: x\n").unwrap();
     let link = dir.path().join("linkdir");
     std::os::unix::fs::symlink(&target, &link).unwrap();
-    let out = dir.path().join("out.txt");
     let err = match Extractor::new(
-        &link,
-        None,
-        false,
-        None,
-        false,
-        false,
-        Some(out.to_str().unwrap()),
-        false,
-        false,
-        false,
-        None,
-        false,
-        false,
-        false,
-        no_interrupt(),
+        &link, None, false, None, false, false, false, false, false, None, false,
     ) {
         Err(e) => e,
         Ok(_) => panic!("expected symlink path to fail in new"),
@@ -508,25 +407,23 @@ fn debug_emits_processing_trail() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = dir.path().join("out.txt");
-    let mut ext = Extractor::new(
+    let ext = Extractor::new(
         sample.join("app.py"),
         None,
         false,
         None,
         false,
         false,
-        Some(out.to_str().unwrap()),
         false,
         false,
         false,
         None,
-        false,
-        false,
         true,
-        no_interrupt(),
     )
     .unwrap();
-    ext.run().unwrap();
+    let mut writer =
+        Writer::new(Some(out.to_str().unwrap()), false, false, no_interrupt()).unwrap();
+    ext.run(&mut writer).unwrap();
 
     let text = fs::read_to_string(&out).unwrap();
     assert!(text.starts_with("processing:\n"));
@@ -639,15 +536,11 @@ fn max_depth_rejects_non_positive() {
         None,
         false,
         false,
-        None,
         false,
         false,
         false,
         Some(0),
         false,
-        false,
-        false,
-        no_interrupt(),
     ) {
         Err(e) => e,
         Ok(_) => panic!("expected max_depth 0 to fail"),
@@ -755,25 +648,13 @@ fn does_not_rescan_output_file() {
     let out = sample.join("TODO");
     fs::write(&out, stale).unwrap();
 
-    let mut ext = Extractor::new(
-        &sample,
-        None,
-        false,
-        None,
-        false,
-        false,
-        Some(out.to_str().unwrap()),
-        false,
-        false,
-        true,
-        None,
-        false,
-        false,
-        false,
-        no_interrupt(),
+    let ext = Extractor::new(
+        &sample, None, false, None, false, false, false, false, true, None, false,
     )
     .unwrap();
-    ext.run().unwrap();
+    let mut writer =
+        Writer::new(Some(out.to_str().unwrap()), false, false, no_interrupt()).unwrap();
+    ext.run(&mut writer).unwrap();
     let text = fs::read_to_string(&out).unwrap();
     assert!(!text.contains("TODO: from previous run"));
     assert!(text.contains("TODO: main"));
