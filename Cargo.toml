@@ -3,6 +3,13 @@ name = "todex"
 version = "0.1.0"
 edition = "2024"
 
+description = "CLI TODO extractor"
+repository = "https://github.com/kaliv0/todex-rs.git"
+keywords = ["TODO", "extractor", "cli"]
+categories = ["development-tools"]
+readme = "README.md"
+license = "MIT"
+
 [[bin]]
 name = "tdx"
 path = "src/main.rs"

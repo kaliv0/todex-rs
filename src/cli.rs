@@ -36,12 +36,13 @@ pub struct Cli {
         num_args = 1..,
         value_name = "TOKEN",
         help = r#"list of tokens to search for (combined with default TODO, FIXME) e.g. WARN, REVISIT.
-If the token is followed by {lines-count} e.g. #FIXME{3}
+If the token is followed by {lines-count} e.g. //FIXME{3}
 the extractor will include multiline snippet with the length specified between the curly braces:
 
-    #FIXME{3} - revisit after release
-    if self.foo == "bar":
-        return f"fizz{buzz}"
+    //FIXME{3} - revisit after release
+    if path == self.root {
+        return false;
+    }
 "#
     )]
     pub tokens: Option<Vec<String>>,
@@ -60,11 +61,11 @@ the extractor will include multiline snippet with the length specified between t
         value_name = "PATTERN",
         help = r#"git-like patterns to skip (paths, names, or globs - combined with default .* / __*), e.g.
 
-    bar.py       any file named bar.py
-    /bar.py      only top-level
-    foo/bar.py   path under the scan root
+    bar.rs       any file named bar.py
+    /bar.rs      only top-level
+    foo/bar.rs   path under the scan root
     vendor/      directory and its contents
-    **/*.pyc     nested matches
+    **/*.toml     nested matches
     !fizz.md     re-include after a broader exclude
 "#
     )]
@@ -94,7 +95,7 @@ the extractor will include multiline snippet with the length specified between t
     #[arg(
         short = 'c',
         long = "concise",
-        help = "display only token messages e.g. '#TODO{5}: after release', ignore longer snippets"
+        help = "display only token messages e.g. '//TODO{5}: after release', ignore longer snippets"
     )]
     pub concise: bool,
 
