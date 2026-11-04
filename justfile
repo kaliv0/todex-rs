@@ -25,6 +25,9 @@ build-release:
 install:
     cargo install --path .
 
+publish: all
+    cargo publish #--allow-dirty
+
 clean:
     cargo clean
     rm -rf dist

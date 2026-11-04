@@ -16,13 +16,13 @@ use crate::{
 };
 
 /// Default max dir depth when recursive.
-pub(crate) const DEFAULT_MAX_DEPTH: usize = 120;
+const DEFAULT_MAX_DEPTH: usize = 120;
 
 /// Default search tokens - TODO, FIXME.
-pub(crate) const DEFAULT_TOKENS: [&str; 2] = ["TODO", "FIXME"];
+const DEFAULT_TOKENS: [&str; 2] = ["TODO", "FIXME"];
 
 /// Default exclude globs for hidden and dunder names.
-pub(crate) const DEFAULT_GLOBS: [&str; 2] = [".*", "__*"];
+const DEFAULT_GLOBS: [&str; 2] = [".*", "__*"];
 
 /// Token scanner for given root path
 pub struct Extractor {

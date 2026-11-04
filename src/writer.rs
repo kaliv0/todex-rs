@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// Default out file name when -o is omitted.
-pub(crate) const DEFAULT_OUT: &str = "TODO";
+const DEFAULT_OUT: &str = "TODO";
 
 /// Writes extract output to a file, stdout, or both.
 pub struct Writer {
