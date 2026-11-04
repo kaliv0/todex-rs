@@ -3,7 +3,7 @@
 </div>
 
 # todex-rs
-
+[![crates.io version](https://img.shields.io/crates/v/todex.svg)](https://crates.io/crates/todex)
 
 Peak mud digger and TODO extractor
 
