@@ -2,14 +2,13 @@
 // each tests/*.rs that does `mod common` compiles its own copy — allow unused in crates that only need a subset
 #![allow(dead_code)]
 
-use std::path::{Path, PathBuf};
-use std::{fs, io};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    sync::{Arc, atomic::AtomicBool},
+};
 
-use std::sync::{Arc, atomic::AtomicBool};
-
-use todex::error::Result;
-use todex::extractor::Extractor;
-use todex::writer::Writer;
+use todex::{Extractor, Result, Writer};
 
 pub fn no_interrupt() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))

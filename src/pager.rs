@@ -1,17 +1,21 @@
+//! TTY pager helper for buffered stdout.
+
 use std::{
-    env, io,
-    io::Write,
+    env,
+    io::{self, Write},
     process::{Command, Stdio},
 };
 
 use crate::error::Result;
 
-pub enum StdoutSink {
+/// Where stdout extract output goes.
+pub(crate) enum StdoutSink {
     None,
     Raw,
     Paged(String),
 }
 
+/// Resolve MANPAGER, then PAGER.
 fn resolve_pager_cmd() -> Option<String> {
     env::var("MANPAGER")
         .or_else(|_| env::var("PAGER"))
@@ -19,7 +23,8 @@ fn resolve_pager_cmd() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-pub fn page(text: &str) -> Result<()> {
+/// Show text in MANPAGER, PAGER, less, more, or raw stdout.
+pub(crate) fn page(text: &str) -> Result<()> {
     let try_cmds = match resolve_pager_cmd() {
         Some(c) => vec![c],
         None => vec!["less".into(), "more".into()],

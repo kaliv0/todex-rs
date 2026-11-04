@@ -1,7 +1,9 @@
 mod common;
 
-use std::io::Read;
-use std::process::{Command, Stdio};
+use std::{
+    io::Read,
+    process::{Command, Stdio},
+};
 
 use common::{APP_OUT, copy_sample};
 

@@ -6,8 +6,7 @@ use common::{
     APP_OUT, copy_sample, no_interrupt, run_extract, run_extract_full, run_extract_with,
     write_good_and_bad,
 };
-use todex::extractor::Extractor;
-use todex::writer::Writer;
+use todex::{Extractor, Writer};
 
 #[test]
 fn default_scan() {
@@ -124,7 +123,7 @@ fn omitted_out_defaults_to_todo() {
     let prev = std::env::current_dir().unwrap();
     std::env::set_current_dir(&sample).unwrap();
 
-    let result = (|| -> todex::error::Result<_> {
+    let result = (|| -> todex::Result<_> {
         let ext = Extractor::new(
             "app.py", None, false, None, false, false, false, false, false, None, false,
         )?;

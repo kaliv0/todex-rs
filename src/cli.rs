@@ -1,3 +1,5 @@
+//! Clap CLI for the tdx binary.
+
 use clap::Parser;
 
 const TRASH: &str = r#"
@@ -26,6 +28,7 @@ const TRASH: &str = r#"
     version,
     help_template = "{about-with-newline}{all-args}{after-help}",
 )]
+/// Parsed tdx command-line arguments.
 pub struct Cli {
     #[arg(value_name = "PATH", help = "path to file or dir to process")]
     pub path: String,
@@ -133,6 +136,7 @@ the extractor will include multiline snippet with the length specified between t
     pub tee: bool,
 }
 
+/// Accept only positive integers for -m.
 fn require_positive_int(s: &str) -> Result<usize, String> {
     match s.parse::<i64>() {
         Ok(num) if num > 0 => Ok(num as usize),

@@ -1,3 +1,5 @@
+//! Output sinks for extract hits.
+
 use std::{
     fs::File,
     io::{self, BufWriter, IsTerminal, Write},
@@ -13,8 +15,10 @@ use crate::{
     pager::{StdoutSink, page},
 };
 
-pub const DEFAULT_OUT: &str = "TODO";
+/// Default out file name when -o is omitted.
+pub(crate) const DEFAULT_OUT: &str = "TODO";
 
+/// Writes extract output to a file, stdout, or both.
 pub struct Writer {
     path: Option<PathBuf>,
     to_stdout: bool,
@@ -24,6 +28,7 @@ pub struct Writer {
 }
 
 impl Writer {
+    /// Open a writer.
     pub fn new(
         name: Option<&str>,
         stdout: bool,
@@ -41,6 +46,7 @@ impl Writer {
         Self::create(Some(path), tee, interrupted)
     }
 
+    /// Truncate the out file early and pick a stdout sink.
     fn create(
         path: Option<PathBuf>,
         to_stdout: bool,
@@ -71,27 +77,33 @@ impl Writer {
         })
     }
 
-    pub fn interrupted(&self) -> bool {
+    /// True after an interrupt was requested.
+    pub(crate) fn interrupted(&self) -> bool {
         self.interrupted.load(Ordering::SeqCst)
     }
 
-    pub fn path(&self) -> Option<&Path> {
+    /// Out file path, if any.
+    pub(crate) fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
 
-    pub fn write_header(&mut self, path_name: &str) -> Result<()> {
+    /// Write a file header block.
+    pub(crate) fn write_header(&mut self, path_name: &str) -> Result<()> {
         self.write(&format!("======================\n{path_name}\n"))
     }
 
-    pub fn write_entry(&mut self, lines_count: usize, line: &str) -> Result<()> {
+    /// Write one hit line with its line number.
+    pub(crate) fn write_entry(&mut self, lines_count: usize, line: &str) -> Result<()> {
         self.write(&format!("\tline {lines_count}: {line}"))
     }
 
-    pub fn debug(&mut self, text: &str) -> Result<()> {
+    /// Write debug text to the active sinks.
+    pub(crate) fn debug(&mut self, text: &str) -> Result<()> {
         self.write(text)
     }
 
-    pub fn error(&mut self, text: &str) -> Result<()> {
+    /// Write an error line to stderr or the pager buffer.
+    pub(crate) fn error(&mut self, text: &str) -> Result<()> {
         if let StdoutSink::Paged(buf) = &mut self.stdout {
             buf.push_str(text);
         } else {
@@ -100,6 +112,7 @@ impl Writer {
         Ok(())
     }
 
+    /// Write text to the active sinks. Broken pipe may stop extraction.
     fn write(&mut self, text: &str) -> Result<()> {
         if self.interrupted() {
             return Err(Error::Interrupted);
@@ -140,6 +153,7 @@ impl Writer {
         Ok(())
     }
 
+    /// Flush sinks. Page buffered TTY stdout if needed.
     pub fn close(&mut self) -> Result<()> {
         if let StdoutSink::Paged(buf) = std::mem::replace(&mut self.stdout, StdoutSink::None) {
             page(&buf)?;
@@ -187,7 +201,7 @@ mod tests {
         }
     }
 
-    /// capture pager stdin to `log` -> silence pager stdout so cargo test stays clean.
+    /// Capture pager stdin to log -> silence pager stdout so cargo test stays clean.
     fn pager_to_file(log: &Path) -> String {
         format!("tee {} >/dev/null", log.display())
     }

@@ -1,3 +1,5 @@
+//! Scan a path for "TODO" tokens and write them out.
+
 use fancy_regex::Regex;
 use std::{
     borrow::Cow,
@@ -13,10 +15,16 @@ use crate::{
     writer::Writer,
 };
 
-pub const DEFAULT_MAX_DEPTH: usize = 120;
-pub const DEFAULT_TOKENS: [&str; 2] = ["TODO", "FIXME"];
-pub const DEFAULT_GLOBS: [&str; 2] = [".*", "__*"];
+/// Default max dir depth when recursive.
+pub(crate) const DEFAULT_MAX_DEPTH: usize = 120;
 
+/// Default search tokens - TODO, FIXME.
+pub(crate) const DEFAULT_TOKENS: [&str; 2] = ["TODO", "FIXME"];
+
+/// Default exclude globs for hidden and dunder names.
+pub(crate) const DEFAULT_GLOBS: [&str; 2] = [".*", "__*"];
+
+/// Token scanner for given root path
 pub struct Extractor {
     root: PathBuf,
     token_pattern: Regex,
@@ -29,6 +37,8 @@ pub struct Extractor {
 }
 
 impl Extractor {
+    /// Build an extractor for the given root and options.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         path: impl AsRef<Path>,
         tokens: Option<Vec<String>>,
@@ -65,6 +75,7 @@ impl Extractor {
         })
     }
 
+    /// Reject missing paths and symlink roots.
     fn prepare_root(path: impl AsRef<Path>) -> Result<PathBuf> {
         let root = path.as_ref().to_path_buf();
         if root.is_symlink() {
@@ -76,6 +87,7 @@ impl Extractor {
         Ok(root)
     }
 
+    /// Build a word-boundary token regex. Longer tokens win first.
     fn prepare_token_pattern(tokens: Vec<String>, ignore_default: bool) -> Result<Regex> {
         let mut tokens = if ignore_default {
             tokens
@@ -104,6 +116,7 @@ impl Extractor {
         Ok(Regex::new(&pattern).expect("failed to compile token pattern"))
     }
 
+    /// Apply the default max depth or reject zero.
     fn prepare_max_depth(max_depth: Option<usize>) -> Result<usize> {
         match max_depth {
             None => Ok(DEFAULT_MAX_DEPTH),
@@ -112,6 +125,7 @@ impl Extractor {
         }
     }
 
+    /// Merge gitignore, defaults, and -x patterns into one spec.
     fn prepare_exclude_spec(
         root: &Path,
         exclude: Vec<String>,
@@ -138,6 +152,7 @@ impl Extractor {
         ExcludeSpec::from_lines(&exclude)
     }
 
+    /// Read .gitignore lines from the scan root when present.
     fn get_gitignore_patterns(root: &Path) -> Result<Vec<String>> {
         let gitignore_file = root.join(".gitignore");
         if !gitignore_file.is_file() {
@@ -147,6 +162,7 @@ impl Extractor {
         Ok(text.lines().map(str::to_string).collect())
     }
 
+    /// Walk the root and write hits.
     pub fn run(&self, writer: &mut Writer) -> Result<()> {
         let walk = (|| -> Result<()> {
             if self.debug {
@@ -166,6 +182,7 @@ impl Extractor {
         walk
     }
 
+    /// Scan file for tokens. Skip undecodable content.
     fn process_file(&self, path: &Path, writer: &mut Writer) -> Result<()> {
         if writer.interrupted() {
             return Err(Error::Interrupted);
@@ -225,6 +242,8 @@ impl Extractor {
         }
     }
 
+    /// Emit a hit header and entry, including an optional brace snippet.
+    #[allow(clippy::too_many_arguments)]
     fn write_hit(
         &self,
         writer: &mut Writer,
@@ -265,6 +284,7 @@ impl Extractor {
         Ok((lines_count, header_added))
     }
 
+    /// Dedent a snippet and indent multi-line bodies for display.
     fn format_snippet_entry(line: &str, multi: bool) -> String {
         let line: Cow<'_, str> = if line.ends_with('\n') {
             Cow::Borrowed(line)
@@ -279,6 +299,7 @@ impl Extractor {
         }
     }
 
+    /// Parse an optional brace count after the matched token.
     fn get_snippet_count_after_token(
         &self,
         display_name: &str,
@@ -311,6 +332,7 @@ impl Extractor {
         }
     }
 
+    /// Attach file and line context when debug is on.
     fn add_debug_note(
         &self,
         msg: String,
@@ -331,6 +353,7 @@ impl Extractor {
         }
     }
 
+    /// Choose absolute, relative, or basename display for a hit header.
     fn prepare_path_name(&self, path: &Path) -> String {
         if self.full_path {
             absolute(path)
@@ -346,6 +369,7 @@ impl Extractor {
         }
     }
 
+    /// Walk one directory. Files first, then recursive child dirs.
     fn process_dir(&self, path: &Path, depth: usize, writer: &mut Writer) -> Result<()> {
         if writer.interrupted() {
             return Err(Error::Interrupted);
@@ -379,6 +403,7 @@ impl Extractor {
         Ok(())
     }
 
+    /// Skip out_file and paths that match exclude rules. Never skip the root.
     fn is_excluded(&self, path: &Path, is_dir: bool, writer: &Writer) -> bool {
         // always process scan root
         if path == self.root {

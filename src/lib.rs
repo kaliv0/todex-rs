@@ -1,6 +1,13 @@
-pub mod cli;
-pub mod error;
-pub mod exclude;
-pub mod extractor;
-pub mod pager;
-pub mod writer;
+//! Extract TODO-style tokens from a file tree.
+
+mod cli;
+mod error;
+mod exclude;
+mod extractor;
+mod pager;
+mod writer;
+
+pub use cli::Cli;
+pub use error::{Error, Result};
+pub use extractor::Extractor;
+pub use writer::Writer;

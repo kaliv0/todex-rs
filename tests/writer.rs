@@ -1,7 +1,9 @@
-use std::fs;
-use std::sync::{Arc, atomic::AtomicBool};
+use std::{
+    fs,
+    sync::{Arc, atomic::AtomicBool},
+};
 
-use todex::writer::Writer;
+use todex::Writer;
 
 #[test]
 fn out_path_truncated_on_init() {
