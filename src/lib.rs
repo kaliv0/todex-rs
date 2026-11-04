@@ -9,5 +9,5 @@ mod writer;
 
 pub use cli::Cli;
 pub use error::{Error, Result};
-pub use extractor::Extractor;
-pub use writer::Writer;
+pub use extractor::{Extractor, ExtractorConfig};
+pub use writer::{OutputDest, Writer};

@@ -8,13 +8,6 @@ use std::{
 
 use crate::error::Result;
 
-/// Where stdout extract output goes.
-pub(crate) enum StdoutSink {
-    None,
-    Raw,
-    Paged(String),
-}
-
 /// Resolve MANPAGER, then PAGER.
 fn resolve_pager_cmd() -> Option<String> {
     env::var("MANPAGER")

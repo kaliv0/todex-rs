@@ -12,11 +12,45 @@ use std::{
 
 use crate::{
     error::{Error, Result},
-    pager::{StdoutSink, page},
+    pager::page,
 };
 
 /// Default out file name when -o is omitted.
 const DEFAULT_OUT: &str = "TODO";
+
+/// CLI-facing destination for extract output: file, stdout, or both (tee).
+pub enum OutputDest {
+    File(PathBuf),
+    Stdout,
+    Tee(PathBuf),
+}
+
+impl OutputDest {
+    /// Out file -> default name `TODO`. If `name` is a dir, write `TODO` inside it.
+    pub fn file(name: Option<&str>) -> Self {
+        Self::File(Self::resolve_out_path(name))
+    }
+
+    /// Out file and stdout.
+    pub fn tee(name: Option<&str>) -> Self {
+        Self::Tee(Self::resolve_out_path(name))
+    }
+
+    fn resolve_out_path(name: Option<&str>) -> PathBuf {
+        let mut path = PathBuf::from(name.unwrap_or(DEFAULT_OUT));
+        if path.is_dir() {
+            path = path.join(DEFAULT_OUT);
+        }
+        path
+    }
+}
+
+/// Runtime stdout mode for an open [`Writer`]: off, direct, or TTY-buffered for a pager.
+pub(crate) enum StdoutSink {
+    None,
+    Raw,
+    Paged(String),
+}
 
 /// Writes extract output to a file, stdout, or both.
 pub struct Writer {
@@ -29,21 +63,12 @@ pub struct Writer {
 
 impl Writer {
     /// Open a writer.
-    pub fn new(
-        name: Option<&str>,
-        stdout: bool,
-        tee: bool,
-        interrupted: Arc<AtomicBool>,
-    ) -> Result<Self> {
-        if stdout {
-            return Self::create(None, true, interrupted);
+    pub fn new(dest: OutputDest, interrupted: Arc<AtomicBool>) -> Result<Self> {
+        match dest {
+            OutputDest::Stdout => Self::create(None, true, interrupted),
+            OutputDest::File(path) => Self::create(Some(path), false, interrupted),
+            OutputDest::Tee(path) => Self::create(Some(path), true, interrupted),
         }
-
-        let mut path = PathBuf::from(name.unwrap_or(DEFAULT_OUT));
-        if path.is_dir() {
-            path = path.join(DEFAULT_OUT);
-        }
-        Self::create(Some(path), tee, interrupted)
     }
 
     /// Truncate the out file early and pick a stdout sink.
@@ -52,13 +77,11 @@ impl Writer {
         to_stdout: bool,
         interrupted: Arc<AtomicBool>,
     ) -> Result<Self> {
-        let file = path
-            .as_ref()
-            .map(|p| -> Result<_> {
-                // truncate early out_file even if no tokens found
-                Ok(BufWriter::new(File::create(p)?))
-            })
-            .transpose()?;
+        let file = match &path {
+            // truncate early out_file even if no tokens found
+            Some(p) => Some(BufWriter::new(File::create(p)?)),
+            None => None,
+        };
 
         let stdout = if !to_stdout {
             StdoutSink::None
@@ -229,7 +252,7 @@ mod tests {
         if io::stdout().is_terminal() {
             return;
         }
-        let w = Writer::new(None, true, false, no_interrupt()).unwrap();
+        let w = Writer::new(OutputDest::Stdout, no_interrupt()).unwrap();
         assert!(matches!(w.stdout, StdoutSink::Raw));
     }
 
@@ -268,7 +291,7 @@ mod tests {
         if io::stdout().is_terminal() {
             return;
         }
-        let mut w = Writer::new(None, true, false, no_interrupt()).unwrap();
+        let mut w = Writer::new(OutputDest::Stdout, no_interrupt()).unwrap();
         w.error("boom\n").unwrap();
     }
 

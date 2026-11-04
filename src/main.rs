@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use clap::Parser;
-use todex::{Cli, Extractor, Result, Writer};
+use todex::{Cli, Extractor, ExtractorConfig, OutputDest, Result, Writer};
 
 const PROG: &str = env!("CARGO_BIN_NAME");
 
@@ -29,19 +29,29 @@ fn run() -> Result<()> {
 
     let extractor = Extractor::new(
         &cli.path,
-        cli.tokens,
-        cli.ignore_default,
-        cli.exclude,
-        cli.include_hidden,
-        cli.use_gitignore,
-        cli.full_path,
-        cli.concise,
-        cli.recursive,
-        cli.max_depth,
-        cli.debug,
+        ExtractorConfig {
+            tokens: cli.tokens,
+            ignore_default: cli.ignore_default,
+            exclude: cli.exclude,
+            include_hidden: cli.include_hidden,
+            use_gitignore: cli.use_gitignore,
+            full_path: cli.full_path,
+            concise: cli.concise,
+            recursive: cli.recursive,
+            max_depth: cli.max_depth,
+            debug: cli.debug,
+        },
     )?;
 
-    let mut writer = Writer::new(cli.out.as_deref(), cli.stdout, cli.tee, interrupted)?;
+    let dest = if cli.stdout {
+        OutputDest::Stdout
+    } else if cli.tee {
+        OutputDest::tee(cli.out.as_deref())
+    } else {
+        OutputDest::file(cli.out.as_deref())
+    };
+
+    let mut writer = Writer::new(dest, interrupted)?;
 
     extractor.run(&mut writer)
 }

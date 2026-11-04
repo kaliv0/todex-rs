@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
 };
 
-use todex::Writer;
+use todex::{OutputDest, Writer};
 
 #[test]
 fn out_path_truncated_on_init() {
@@ -12,9 +12,7 @@ fn out_path_truncated_on_init() {
     fs::write(&out, "stale\n").unwrap();
 
     let mut w = Writer::new(
-        Some(out.to_str().unwrap()),
-        false,
-        false,
+        OutputDest::file(out.to_str()),
         Arc::new(AtomicBool::new(false)),
     )
     .unwrap();

@@ -6,7 +6,7 @@ use common::{
     APP_OUT, RunOpts, copy_sample, extractor, file_writer, no_interrupt, run, write_abc_tree,
     write_good_and_bad,
 };
-use todex::Writer;
+use todex::{OutputDest, Writer};
 
 #[test]
 fn default_scan() {
@@ -90,13 +90,7 @@ fn o_dir_writes_todo_inside() {
     fs::create_dir(&reports).unwrap();
 
     let ext = extractor(sample.join("app.py"), RunOpts::default()).unwrap();
-    let mut writer = Writer::new(
-        Some(reports.to_str().unwrap()),
-        false,
-        false,
-        no_interrupt(),
-    )
-    .unwrap();
+    let mut writer = Writer::new(OutputDest::file(reports.to_str()), no_interrupt()).unwrap();
     ext.run(&mut writer).unwrap();
 
     assert_eq!(fs::read_to_string(reports.join("TODO")).unwrap(), APP_OUT);
@@ -111,7 +105,7 @@ fn omitted_out_defaults_to_todo() {
 
     let result = (|| -> todex::Result<_> {
         let ext = extractor("app.py", RunOpts::default())?;
-        let mut writer = Writer::new(None, false, false, no_interrupt())?;
+        let mut writer = Writer::new(OutputDest::file(None), no_interrupt())?;
         ext.run(&mut writer)?;
         Ok(fs::read_to_string("TODO")?)
     })();

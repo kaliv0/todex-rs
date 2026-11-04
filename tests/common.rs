@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
 };
 
-use todex::{Extractor, Result, Writer};
+use todex::{Extractor, ExtractorConfig, OutputDest, Result, Writer};
 
 pub fn no_interrupt() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))
@@ -48,21 +48,23 @@ pub fn copy_sample(dest: &Path) -> io::Result<PathBuf> {
 pub fn extractor(path: impl AsRef<Path>, opts: RunOpts) -> Result<Extractor> {
     Extractor::new(
         path,
-        opts.tokens,
-        opts.ignore_default,
-        opts.exclude,
-        opts.include_hidden,
-        opts.use_gitignore,
-        opts.full_path,
-        opts.concise,
-        opts.recursive,
-        opts.max_depth,
-        opts.debug,
+        ExtractorConfig {
+            tokens: opts.tokens,
+            ignore_default: opts.ignore_default,
+            exclude: opts.exclude,
+            include_hidden: opts.include_hidden,
+            use_gitignore: opts.use_gitignore,
+            full_path: opts.full_path,
+            concise: opts.concise,
+            recursive: opts.recursive,
+            max_depth: opts.max_depth,
+            debug: opts.debug,
+        },
     )
 }
 
 pub fn file_writer(out: &Path) -> Result<Writer> {
-    Writer::new(Some(out.to_str().unwrap()), false, false, no_interrupt())
+    Writer::new(OutputDest::file(out.to_str()), no_interrupt())
 }
 
 pub fn run(path: &Path, out: &Path, opts: RunOpts) -> Result<String> {

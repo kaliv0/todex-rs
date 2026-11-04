@@ -7,6 +7,7 @@ use std::{
     fs::{self, File},
     io::{BufRead, BufReader},
     path::{Path, PathBuf, absolute},
+    range::Range,
 };
 
 use crate::{
@@ -24,54 +25,56 @@ const DEFAULT_TOKENS: [&str; 2] = ["TODO", "FIXME"];
 /// Default exclude globs for hidden and dunder names.
 const DEFAULT_GLOBS: [&str; 2] = [".*", "__*"];
 
+/// Options for [`Extractor::new`]
+#[derive(Debug, Default)]
+pub struct ExtractorConfig {
+    pub tokens: Option<Vec<String>>,
+    pub ignore_default: bool,
+    pub exclude: Option<Vec<String>>,
+    pub include_hidden: bool,
+    pub use_gitignore: bool,
+    pub full_path: bool,
+    pub concise: bool,
+    pub recursive: bool,
+    pub max_depth: Option<usize>,
+    pub debug: bool,
+}
+
 /// Token scanner for given root path
 pub struct Extractor {
     root: PathBuf,
     token_pattern: Regex,
     exclude_spec: ExcludeSpec,
+    max_depth: usize,
+    recursive: bool,
     full_path: bool,
     concise: bool,
-    recursive: bool,
-    max_depth: usize,
     debug: bool,
 }
 
 impl Extractor {
     /// Build an extractor for the given root and options.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        path: impl AsRef<Path>,
-        tokens: Option<Vec<String>>,
-        ignore_default: bool,
-        exclude: Option<Vec<String>>,
-        include_hidden: bool,
-        use_gitignore: bool,
-        full_path: bool,
-        concise: bool,
-        recursive: bool,
-        max_depth: Option<usize>,
-        debug: bool,
-    ) -> Result<Self> {
+    pub fn new(path: impl AsRef<Path>, config: ExtractorConfig) -> Result<Self> {
         let root = Self::prepare_root(path)?;
         let token_pattern =
-            Self::prepare_token_pattern(tokens.unwrap_or_default(), ignore_default)?;
+            Self::prepare_token_pattern(config.tokens.unwrap_or_default(), config.ignore_default)?;
         let exclude_spec = Self::prepare_exclude_spec(
             &root,
-            exclude.unwrap_or_default(),
-            include_hidden,
-            use_gitignore,
+            config.exclude.unwrap_or_default(),
+            config.include_hidden,
+            config.use_gitignore,
         )?;
-        let max_depth = Self::prepare_max_depth(max_depth)?;
+        let max_depth = Self::prepare_max_depth(config.max_depth)?;
 
         Ok(Self {
             root,
             token_pattern,
             exclude_spec,
-            full_path,
-            concise,
-            recursive,
             max_depth,
-            debug,
+            recursive: config.recursive,
+            full_path: config.full_path,
+            concise: config.concise,
+            debug: config.debug,
         })
     }
 
@@ -164,22 +167,24 @@ impl Extractor {
 
     /// Walk the root and write hits.
     pub fn run(&self, writer: &mut Writer) -> Result<()> {
-        let walk = (|| -> Result<()> {
-            if self.debug {
-                writer.debug("processing:\n")?;
-            }
-
-            if self.root.is_file() {
-                self.process_file(&self.root, writer)
-            } else if self.root.is_dir() {
-                self.process_dir(&self.root, 0, writer)
-            } else {
-                Err(Error::NotFileOrDir(self.root.clone()))
-            }
-        })();
-
+        let walk = self.walk(writer);
         writer.close()?; // always flush out_file
         walk
+    }
+
+    /// Process as file or directory.
+    fn walk(&self, writer: &mut Writer) -> Result<()> {
+        if self.debug {
+            writer.debug("processing:\n")?;
+        }
+
+        if self.root.is_file() {
+            self.process_file(&self.root, writer)
+        } else if self.root.is_dir() {
+            self.process_dir(&self.root, 0, writer)
+        } else {
+            Err(Error::NotFileOrDir(self.root.clone()))
+        }
     }
 
     /// Scan file for tokens. Skip undecodable content.
@@ -198,40 +203,7 @@ impl Extractor {
 
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
-        let mut line = String::new();
-
-        let mut lines_count = 0usize;
-        let mut header_added = false;
-
-        match (|| -> Result<()> {
-            loop {
-                line.clear();
-                if reader.read_line(&mut line)? == 0 {
-                    break;
-                }
-                lines_count += 1;
-
-                let Some(matched) = self
-                    .token_pattern
-                    .find(&line)
-                    .expect("token pattern find returned an error")
-                else {
-                    continue;
-                };
-
-                (lines_count, header_added) = self.write_hit(
-                    writer,
-                    &mut reader,
-                    &display_name,
-                    &line,
-                    lines_count,
-                    matched.start(),
-                    matched.end(),
-                    header_added,
-                )?;
-            }
-            Ok(())
-        })() {
+        match self.scan_lines(&mut reader, &display_name, writer) {
             Err(e) if e.is_invalid_data() => {
                 if self.debug {
                     writer.error(&format!("skipping {display_name}:\n{e}\n"))?;
@@ -240,6 +212,45 @@ impl Extractor {
             }
             other => other,
         }
+    }
+
+    /// Read lines and emit hits. Callers handle undecodable content.
+    fn scan_lines(
+        &self,
+        reader: &mut BufReader<File>,
+        display_name: &str,
+        writer: &mut Writer,
+    ) -> Result<()> {
+        let mut line = String::new();
+        let mut lines_count = 0usize;
+        let mut header_added = false;
+
+        loop {
+            line.clear();
+            if reader.read_line(&mut line)? == 0 {
+                break;
+            }
+            lines_count += 1;
+
+            let Some(matched) = self
+                .token_pattern
+                .find(&line)
+                .expect("token pattern find returned an error")
+            else {
+                continue;
+            };
+
+            (lines_count, header_added) = self.write_hit(
+                writer,
+                reader,
+                display_name,
+                &line,
+                lines_count,
+                Range::from(matched.start()..matched.end()),
+                header_added,
+            )?;
+        }
+        Ok(())
     }
 
     /// Emit a hit header and entry, including an optional brace snippet.
@@ -251,8 +262,7 @@ impl Extractor {
         display_name: &str,
         line: &str,
         mut lines_count: usize,
-        token_start: usize,
-        token_end: usize,
+        token: Range<usize>,
         mut header_added: bool,
     ) -> Result<(usize, bool)> {
         if !header_added {
@@ -261,21 +271,21 @@ impl Extractor {
         }
 
         let snippet_count =
-            self.get_snippet_count_after_token(display_name, line, token_end, lines_count)?;
+            self.get_snippet_count_after_token(display_name, line, token.end, lines_count)?;
         if self.concise {
-            writer.write_entry(lines_count, &line[token_start..])?;
+            writer.write_entry(lines_count, &line[token.start..])?;
             return Ok((lines_count, header_added));
         }
 
         let display_line_num = lines_count;
         let mut snippet = line.to_string();
-        let mut line = String::new();
+        let mut extra = String::new();
         for _ in 1..snippet_count {
-            line.clear();
-            if reader.read_line(&mut line)? == 0 {
+            extra.clear();
+            if reader.read_line(&mut extra)? == 0 {
                 break;
             }
-            snippet.push_str(&line);
+            snippet.push_str(&extra);
             lines_count += 1;
         }
 
@@ -286,6 +296,7 @@ impl Extractor {
 
     /// Dedent a snippet and indent multi-line bodies for display.
     fn format_snippet_entry(line: &str, multi: bool) -> String {
+        // shiny micro-optimization although dedent still allocates
         let line: Cow<'_, str> = if line.ends_with('\n') {
             Cow::Borrowed(line)
         } else {
@@ -446,10 +457,7 @@ mod tests {
     }
 
     fn default_extractor(path: impl AsRef<Path>) -> Extractor {
-        Extractor::new(
-            path, None, false, None, false, false, false, false, false, None, false,
-        )
-        .unwrap()
+        Extractor::new(path, ExtractorConfig::default()).unwrap()
     }
 
     #[test]
@@ -577,22 +585,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ext = Extractor::new(
             dir.path(),
-            None,
-            false,
-            Some(vec![
-                "vendor/".into(),
-                "!vendor/keep.py".into(),
-                "# comment".into(),
-                "".into(),
-                "  ".into(),
-            ]),
-            false,
-            false,
-            false,
-            false,
-            false,
-            None,
-            false,
+            ExtractorConfig {
+                exclude: Some(vec![
+                    "vendor/".into(),
+                    "!vendor/keep.py".into(),
+                    "# comment".into(),
+                    "".into(),
+                    "  ".into(),
+                ]),
+                ..Default::default()
+            },
         )
         .unwrap();
         let spec = &ext.exclude_spec;
@@ -612,7 +614,11 @@ mod tests {
         fs::write(&file, "# TODO: x\n").unwrap();
         fs::write(dir.path().join(".gitignore"), "vendor/\n").unwrap();
         let ext = Extractor::new(
-            &file, None, false, None, false, true, false, false, false, None, false,
+            &file,
+            ExtractorConfig {
+                use_gitignore: true,
+                ..Default::default()
+            },
         )
         .unwrap();
         assert!(!ext.exclude_spec.matches("vendor/lib.py", false));
