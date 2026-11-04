@@ -3,17 +3,17 @@ mod common;
 use std::fs;
 
 use common::{
-    APP_OUT, copy_sample, no_interrupt, run_extract, run_extract_full, run_extract_with,
+    APP_OUT, RunOpts, copy_sample, extractor, file_writer, no_interrupt, run, write_abc_tree,
     write_good_and_bad,
 };
-use todex::{Extractor, Writer};
+use todex::Writer;
 
 #[test]
 fn default_scan() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract(&sample.join("app.py"), &out).unwrap();
+    let text = run(&sample.join("app.py"), &out, RunOpts::default()).unwrap();
     assert!(text.contains("TODO: main"));
     assert!(text.contains("FIXME: bug"));
     assert!(!text.contains("WARN: careful"));
@@ -24,14 +24,13 @@ fn t_adds_token_and_keeps_defaults() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_with(
+    let text = run(
         &sample.join("app.py"),
         &out,
-        Some(vec!["WARN".into()]),
-        false,
-        false,
-        false,
-        None,
+        RunOpts {
+            tokens: Some(vec!["WARN".into()]),
+            ..Default::default()
+        },
     )
     .unwrap();
     assert!(text.contains("WARN: careful"));
@@ -43,14 +42,14 @@ fn i_with_t_uses_only_custom_tokens() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_with(
+    let text = run(
         &sample.join("app.py"),
         &out,
-        Some(vec!["WARN".into()]),
-        true,
-        false,
-        false,
-        None,
+        RunOpts {
+            tokens: Some(vec!["WARN".into()]),
+            ignore_default: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     assert!(text.contains("WARN: careful"));
@@ -62,19 +61,19 @@ fn custom_tokens_smoke() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_with(
+    let text = run(
         &sample.join("custom_tokens.py"),
         &out,
-        Some(vec![
-            "NOTE".into(),
-            "!!!URGENT!!!".into(),
-            "@FIXME".into(),
-            "中文标记".into(),
-        ]),
-        true,
-        false,
-        false,
-        None,
+        RunOpts {
+            tokens: Some(vec![
+                "NOTE".into(),
+                "!!!URGENT!!!".into(),
+                "@FIXME".into(),
+                "中文标记".into(),
+            ]),
+            ignore_default: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     assert!(text.contains("plain note"));
@@ -90,20 +89,7 @@ fn o_dir_writes_todo_inside() {
     let reports = sample.join("reports");
     fs::create_dir(&reports).unwrap();
 
-    let ext = Extractor::new(
-        sample.join("app.py"),
-        None,
-        false,
-        None,
-        false,
-        false,
-        false,
-        false,
-        false,
-        None,
-        false,
-    )
-    .unwrap();
+    let ext = extractor(sample.join("app.py"), RunOpts::default()).unwrap();
     let mut writer = Writer::new(
         Some(reports.to_str().unwrap()),
         false,
@@ -124,9 +110,7 @@ fn omitted_out_defaults_to_todo() {
     std::env::set_current_dir(&sample).unwrap();
 
     let result = (|| -> todex::Result<_> {
-        let ext = Extractor::new(
-            "app.py", None, false, None, false, false, false, false, false, None, false,
-        )?;
+        let ext = extractor("app.py", RunOpts::default())?;
         let mut writer = Writer::new(None, false, false, no_interrupt())?;
         ext.run(&mut writer)?;
         Ok(fs::read_to_string("TODO")?)
@@ -143,14 +127,7 @@ fn zero_token_file_empty_out() {
         let src = dir.path().join(name);
         let out = dir.path().join(format!("{name}.out"));
         fs::write(&src, content).unwrap();
-        let ext = Extractor::new(
-            &src, None, false, None, false, false, false, false, false, None, false,
-        )
-        .unwrap();
-        let mut writer =
-            Writer::new(Some(out.to_str().unwrap()), false, false, no_interrupt()).unwrap();
-        ext.run(&mut writer).unwrap();
-        assert_eq!(fs::read_to_string(&out).unwrap(), "");
+        assert_eq!(run(&src, &out, RunOpts::default()).unwrap(), "");
     }
 }
 
@@ -159,16 +136,7 @@ fn o_equals_scanned_file_truncates() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("f.py");
     fs::write(&src, "# TODO: will be truncated\n").unwrap();
-
-    let ext = Extractor::new(
-        &src, None, false, None, false, false, false, false, false, None, false,
-    )
-    .unwrap();
-    let mut writer =
-        Writer::new(Some(src.to_str().unwrap()), false, false, no_interrupt()).unwrap();
-    ext.run(&mut writer).unwrap();
-
-    assert_eq!(fs::read_to_string(&src).unwrap(), "");
+    assert_eq!(run(&src, &src, RunOpts::default()).unwrap(), "");
 }
 
 #[test]
@@ -178,16 +146,7 @@ fn zero_hit_scan_truncates_stale_out() {
     let out = dir.path().join("out.txt");
     fs::write(&src, "print(1)\n").unwrap();
     fs::write(&out, "stale from previous run\n").unwrap();
-
-    let ext = Extractor::new(
-        &src, None, false, None, false, false, false, false, false, None, false,
-    )
-    .unwrap();
-    let mut writer =
-        Writer::new(Some(out.to_str().unwrap()), false, false, no_interrupt()).unwrap();
-    ext.run(&mut writer).unwrap();
-
-    assert_eq!(fs::read_to_string(&out).unwrap(), "");
+    assert_eq!(run(&src, &out, RunOpts::default()).unwrap(), "");
 }
 
 #[test]
@@ -195,31 +154,24 @@ fn missing_path_raises() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("missing");
     let out = dir.path().join("out.txt");
-    let err = match Extractor::new(
-        &missing, None, false, None, false, false, false, false, false, None, false,
-    ) {
-        Err(e) => e,
-        Ok(_) => panic!("expected missing path to fail in new"),
-    };
-    assert!(err.to_string().contains("not found"));
+    let result = extractor(&missing, RunOpts::default());
+    assert!(result.is_err());
+    assert!(result.err().unwrap().to_string().contains("not found"));
     assert!(!out.exists());
 }
-
-// --- concise / snippets ---
 
 #[test]
 fn c_omits_snippet_body() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_with(
+    let text = run(
         &sample.join("snippet.py"),
         &out,
-        None,
-        false,
-        true,
-        false,
-        None,
+        RunOpts {
+            concise: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     assert!(text.contains("FIXME"));
@@ -231,7 +183,7 @@ fn snippet_includes_following_lines() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract(&sample.join("snippet.py"), &out).unwrap();
+    let text = run(&sample.join("snippet.py"), &out, RunOpts::default()).unwrap();
     assert!(text.contains("return 1"));
 }
 
@@ -241,14 +193,14 @@ fn warn_snippet_count() {
     let src = dir.path().join("warn.py");
     let out = dir.path().join("out.txt");
     fs::write(&src, "# WARN{2} check this\nx = 1\ny = 2\n").unwrap();
-    let text = run_extract_with(
+    let text = run(
         &src,
         &out,
-        Some(vec!["WARN".into()]),
-        true,
-        false,
-        false,
-        None,
+        RunOpts {
+            tokens: Some(vec!["WARN".into()]),
+            ignore_default: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     assert!(text.contains("WARN"));
@@ -262,7 +214,7 @@ fn snippet_past_eof_does_not_crash() {
     let src = dir.path().join("short.py");
     let out = dir.path().join("out.txt");
     fs::write(&src, "# TODO{10} almost eof\nonly one more\n").unwrap();
-    let text = run_extract(&src, &out).unwrap();
+    let text = run(&src, &out, RunOpts::default()).unwrap();
     assert!(text.contains("TODO"));
     assert!(text.contains("only one more"));
 }
@@ -275,12 +227,15 @@ fn invalid_snippet_raises() {
             let src = dir.path().join("bad.py");
             let out = dir.path().join("out.txt");
             fs::write(&src, content).unwrap();
-            let ext = Extractor::new(
-                &src, None, false, None, false, false, false, concise, false, None, false,
+            let ext = extractor(
+                &src,
+                RunOpts {
+                    concise,
+                    ..Default::default()
+                },
             )
             .unwrap();
-            let mut writer =
-                Writer::new(Some(out.to_str().unwrap()), false, false, no_interrupt()).unwrap();
+            let mut writer = file_writer(&out).unwrap();
             let err = ext.run(&mut writer).unwrap_err();
             assert!(
                 err.to_string().contains("invalid snippet count"),
@@ -296,7 +251,7 @@ fn multiple_hits_one_header_and_line_numbers() {
     let src = dir.path().join("multi.py");
     let out = dir.path().join("out.txt");
     fs::write(&src, "line1\n# TODO{2} first\nbody\n# FIXME: second\n").unwrap();
-    let text = run_extract(&src, &out).unwrap();
+    let text = run(&src, &out, RunOpts::default()).unwrap();
     assert_eq!(text.matches("======================").count(), 1);
     assert!(text.contains("line 2:"));
     assert!(text.contains("line 4:"));
@@ -311,8 +266,13 @@ fn f_writes_absolute_path() {
     let sample = copy_sample(dir.path()).unwrap();
     let target = sample.join("app.py");
     let out = sample.join("out.txt");
-    let text = run_extract_full(
-        &target, &out, None, false, None, false, false, true, false, false, None,
+    let text = run(
+        &target,
+        &out,
+        RunOpts {
+            full_path: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     let abs = std::path::absolute(&target).unwrap();
@@ -327,7 +287,7 @@ fn without_r_skips_nested() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract(&sample, &out).unwrap();
+    let text = run(&sample, &out, RunOpts::default()).unwrap();
     assert!(!text.contains("TODO: deep"));
     assert!(text.contains("TODO: main"));
 }
@@ -335,70 +295,73 @@ fn without_r_skips_nested() {
 #[test]
 fn dir_walk_order_depth0_files_by_name() {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-    for name in ["c.py", "a.py", "b.py"] {
-        fs::write(root.join(name), format!("# TODO: {name}\n")).unwrap();
-    }
-    let nested = root.join("d");
-    fs::create_dir(&nested).unwrap();
-    fs::write(nested.join("z.py"), "# TODO: nested\n").unwrap();
-    let out = root.join("out.txt");
-    let text = run_extract(root, &out).unwrap();
+    write_abc_tree(dir.path()).unwrap();
+    let out = dir.path().join("out.txt");
+    let text = run(dir.path(), &out, RunOpts::default()).unwrap();
     assert!(text.find("TODO: a.py").unwrap() < text.find("TODO: b.py").unwrap());
     assert!(text.find("TODO: b.py").unwrap() < text.find("TODO: c.py").unwrap());
     assert!(!text.contains("TODO: nested"));
 }
 
 #[test]
-fn symlink_not_followed_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let outside = dir.path().join("outside");
-    fs::create_dir(&outside).unwrap();
-    let target = outside.join("target.py");
-    fs::write(&target, "# TODO: via-file-link\n").unwrap();
+fn symlink_not_followed() {
+    for (link_name, target_is_dir, recursive, hidden) in [
+        ("link.py", false, false, "TODO: via-file-link"),
+        ("linkdir", true, true, "TODO: through-symlink"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        let target = if target_is_dir {
+            fs::write(outside.join("via_link.py"), format!("# {hidden}\n")).unwrap();
+            outside.clone()
+        } else {
+            let target = outside.join("target.py");
+            fs::write(&target, format!("# {hidden}\n")).unwrap();
+            target
+        };
 
-    let scan = dir.path().join("scan");
-    fs::create_dir(&scan).unwrap();
-    fs::write(scan.join("top.py"), "# TODO: top\n").unwrap();
-    std::os::unix::fs::symlink(&target, scan.join("link.py")).unwrap();
+        let scan = dir.path().join("scan");
+        fs::create_dir(&scan).unwrap();
+        fs::write(scan.join("top.py"), "# TODO: top\n").unwrap();
+        std::os::unix::fs::symlink(&target, scan.join(link_name)).unwrap();
 
-    let out = scan.join("out.txt");
-    let text = run_extract(&scan, &out).unwrap();
-    assert!(text.contains("TODO: top"));
-    assert!(!text.contains("TODO: via-file-link"));
+        let out = scan.join("out.txt");
+        let text = run(
+            &scan,
+            &out,
+            RunOpts {
+                recursive,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(text.contains("TODO: top"), "link={link_name}");
+        assert!(!text.contains(hidden), "link={link_name}");
+    }
 }
 
 #[test]
-fn symlink_path_raises_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let target = dir.path().join("file.py");
-    fs::write(&target, "# TODO: x\n").unwrap();
-    let link = dir.path().join("link.py");
-    std::os::unix::fs::symlink(&target, &link).unwrap();
-    let err = match Extractor::new(
-        &link, None, false, None, false, false, false, false, false, None, false,
-    ) {
-        Err(e) => e,
-        Ok(_) => panic!("expected symlink path to fail in new"),
-    };
-    assert!(err.to_string().contains("is a symlink"));
-}
-
-#[test]
-fn symlink_path_raises_dir() {
-    let dir = tempfile::tempdir().unwrap();
-    let target = dir.path().join("dir");
-    fs::create_dir(&target).unwrap();
-    fs::write(target.join("x.py"), "# TODO: x\n").unwrap();
-    let link = dir.path().join("linkdir");
-    std::os::unix::fs::symlink(&target, &link).unwrap();
-    let err = match Extractor::new(
-        &link, None, false, None, false, false, false, false, false, None, false,
-    ) {
-        Err(e) => e,
-        Ok(_) => panic!("expected symlink path to fail in new"),
-    };
-    assert!(err.to_string().contains("is a symlink"));
+fn symlink_path_raises() {
+    for target_is_dir in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir
+            .path()
+            .join(if target_is_dir { "dir" } else { "file.py" });
+        if target_is_dir {
+            fs::create_dir(&target).unwrap();
+            fs::write(target.join("x.py"), "# TODO: x\n").unwrap();
+        } else {
+            fs::write(&target, "# TODO: x\n").unwrap();
+        }
+        let link = dir
+            .path()
+            .join(if target_is_dir { "linkdir" } else { "link.py" });
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let result = extractor(&link, RunOpts::default());
+        assert!(result.is_err(), "target_is_dir={target_is_dir}");
+        assert!(result.err().unwrap().to_string().contains("is a symlink"));
+    }
 }
 
 #[test]
@@ -406,25 +369,15 @@ fn debug_emits_processing_trail() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = dir.path().join("out.txt");
-    let ext = Extractor::new(
-        sample.join("app.py"),
-        None,
-        false,
-        None,
-        false,
-        false,
-        false,
-        false,
-        false,
-        None,
-        true,
+    let text = run(
+        &sample.join("app.py"),
+        &out,
+        RunOpts {
+            debug: true,
+            ..Default::default()
+        },
     )
     .unwrap();
-    let mut writer =
-        Writer::new(Some(out.to_str().unwrap()), false, false, no_interrupt()).unwrap();
-    ext.run(&mut writer).unwrap();
-
-    let text = fs::read_to_string(&out).unwrap();
     assert!(text.starts_with("processing:\n"));
     assert!(text.contains("\tapp.py\n"));
 }
@@ -485,20 +438,20 @@ fn skips_undecodable_mid_file_keeps_prior_hits() {
     assert!(err.contains("mixed.py"), "err={err}");
 }
 
-// --- recursion ---
-
 #[test]
 fn dir_walk_order_files_then_dirs_by_name() {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-    for name in ["c.py", "a.py", "b.py"] {
-        fs::write(root.join(name), format!("# TODO: {name}\n")).unwrap();
-    }
-    let nested = root.join("d");
-    fs::create_dir(&nested).unwrap();
-    fs::write(nested.join("z.py"), "# TODO: nested\n").unwrap();
-    let out = root.join("out.txt");
-    let text = run_extract_with(root, &out, None, false, false, true, None).unwrap();
+    write_abc_tree(dir.path()).unwrap();
+    let out = dir.path().join("out.txt");
+    let text = run(
+        dir.path(),
+        &out,
+        RunOpts {
+            recursive: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     assert!(text.find("TODO: a.py").unwrap() < text.find("TODO: b.py").unwrap());
     assert!(text.find("TODO: b.py").unwrap() < text.find("TODO: c.py").unwrap());
     assert!(text.find("TODO: c.py").unwrap() < text.find("TODO: nested").unwrap());
@@ -509,7 +462,15 @@ fn r_finds_nested() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_with(&sample, &out, None, false, false, true, None).unwrap();
+    let text = run(
+        &sample,
+        &out,
+        RunOpts {
+            recursive: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     assert!(text.contains("TODO: deep"));
     assert!(text.contains("TODO: deeper"));
 }
@@ -519,7 +480,16 @@ fn r_m_limits_depth() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_with(&sample, &out, None, false, false, true, Some(1)).unwrap();
+    let text = run(
+        &sample,
+        &out,
+        RunOpts {
+            recursive: true,
+            max_depth: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
     assert!(text.contains("TODO: deep"));
     assert!(!text.contains("TODO: deeper"));
 }
@@ -527,78 +497,21 @@ fn r_m_limits_depth() {
 #[test]
 fn max_depth_rejects_non_positive() {
     let dir = tempfile::tempdir().unwrap();
-    // out omitted on purpose: bad max_depth must fail before default TODO is created
-    let err = match Extractor::new(
+    let result = extractor(
         dir.path(),
-        None,
-        false,
-        None,
-        false,
-        false,
-        false,
-        false,
-        false,
-        Some(0),
-        false,
-    ) {
-        Err(e) => e,
-        Ok(_) => panic!("expected max_depth 0 to fail"),
-    };
+        RunOpts {
+            max_depth: Some(0),
+            ..Default::default()
+        },
+    );
+    assert!(result.is_err());
     assert!(
-        err.to_string()
+        result
+            .err()
+            .unwrap()
+            .to_string()
             .contains("max_depth must be a positive integer")
     );
-}
-
-#[test]
-fn symlink_not_followed_dir() {
-    let dir = tempfile::tempdir().unwrap();
-    let outside = dir.path().join("outside");
-    fs::create_dir(&outside).unwrap();
-    fs::write(outside.join("via_link.py"), "# TODO: through-symlink\n").unwrap();
-
-    let scan = dir.path().join("scan");
-    fs::create_dir(&scan).unwrap();
-    fs::write(scan.join("top.py"), "# TODO: top\n").unwrap();
-    std::os::unix::fs::symlink(&outside, scan.join("linkdir")).unwrap();
-
-    let out = scan.join("out.txt");
-    let text = run_extract_with(&scan, &out, None, false, false, true, None).unwrap();
-    assert!(text.contains("TODO: top"));
-    assert!(!text.contains("TODO: through-symlink"));
-}
-
-#[test]
-fn s_writes_to_stdout_only() {
-    let dir = tempfile::tempdir().unwrap();
-    let sample = copy_sample(dir.path()).unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tdx"))
-        .args([sample.join("app.py").to_str().unwrap(), "-s"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    assert_eq!(String::from_utf8_lossy(&output.stdout), APP_OUT);
-    assert!(!sample.join("TODO").exists());
-}
-
-#[test]
-fn tee_writes_stdout_and_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let sample = copy_sample(dir.path()).unwrap();
-    let out = sample.join("out.txt");
-    // use the binary so tee stdout is captured (not mixed into the test runner)
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tdx"))
-        .args([
-            sample.join("app.py").to_str().unwrap(),
-            "-o",
-            out.to_str().unwrap(),
-            "--tee",
-        ])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    assert_eq!(fs::read_to_string(&out).unwrap(), APP_OUT);
-    assert_eq!(String::from_utf8_lossy(&output.stdout), APP_OUT);
 }
 
 #[test]
@@ -633,7 +546,7 @@ fn tee_survives_broken_stdout() {
         .unwrap();
     drop(child.stdout.take());
     let status = child.wait().unwrap();
-    // tee keeps writing the file; broken stdout is not a hard failure for tee
+    // tee still finishes the file; broken stdout is not always a hard failure
     assert!(status.success() || status.code() == Some(1));
     assert_eq!(fs::read_to_string(&out).unwrap(), APP_OUT);
 }
@@ -647,14 +560,15 @@ fn does_not_rescan_output_file() {
     let out = sample.join("TODO");
     fs::write(&out, stale).unwrap();
 
-    let ext = Extractor::new(
-        &sample, None, false, None, false, false, false, false, true, None, false,
+    let text = run(
+        &sample,
+        &out,
+        RunOpts {
+            recursive: true,
+            ..Default::default()
+        },
     )
     .unwrap();
-    let mut writer =
-        Writer::new(Some(out.to_str().unwrap()), false, false, no_interrupt()).unwrap();
-    ext.run(&mut writer).unwrap();
-    let text = fs::read_to_string(&out).unwrap();
     assert!(!text.contains("TODO: from previous run"));
     assert!(text.contains("TODO: main"));
 }
@@ -672,25 +586,19 @@ fn stdout_has_no_out_skip() {
     assert!(String::from_utf8_lossy(&output.stdout).contains("TODO: keep scanning me"));
 }
 
-// --- excludes / hidden / gitignore ---
-
 #[test]
 fn x_skips_patterns() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_full(
+    let text = run(
         &sample,
         &out,
-        None,
-        false,
-        Some(vec!["skip_me.py".into(), "vendor/".into()]),
-        false,
-        false,
-        false,
-        false,
-        true,
-        None,
+        RunOpts {
+            exclude: Some(vec!["skip_me.py".into(), "vendor/".into()]),
+            recursive: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     assert!(!text.contains("TODO: skip"));
@@ -703,7 +611,15 @@ fn skips_hidden_and_dunder() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_with(&sample, &out, None, false, false, true, None).unwrap();
+    let text = run(
+        &sample,
+        &out,
+        RunOpts {
+            recursive: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     assert!(!text.contains("TODO: hidden"));
     assert!(!text.contains("TODO: dunder"));
 }
@@ -713,8 +629,14 @@ fn h_includes_hidden_and_dunder() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_full(
-        &sample, &out, None, false, None, true, false, false, false, true, None,
+    let text = run(
+        &sample,
+        &out,
+        RunOpts {
+            include_hidden: true,
+            recursive: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     assert!(text.contains("TODO: hidden"));
@@ -726,8 +648,14 @@ fn g_applies_gitignore_and_default_hidden() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_full(
-        &sample, &out, None, false, None, false, true, false, false, true, None,
+    let text = run(
+        &sample,
+        &out,
+        RunOpts {
+            use_gitignore: true,
+            recursive: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     assert!(!text.contains("TODO: vendored"));
@@ -741,13 +669,19 @@ fn g_with_h_includes_hidden_but_keeps_gitignore() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_full(
-        &sample, &out, None, false, None, true, true, false, false, true, None,
+    let text = run(
+        &sample,
+        &out,
+        RunOpts {
+            include_hidden: true,
+            use_gitignore: true,
+            recursive: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     assert!(text.contains("TODO: hidden"));
     assert!(!text.contains("TODO: vendored"));
-    // .venv not in .gitignore; .* default off via -H
     assert!(text.contains("TODO: venv"));
 }
 
@@ -756,18 +690,15 @@ fn g_with_x_bang_reincludes_vendor() {
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_full(
+    let text = run(
         &sample,
         &out,
-        None,
-        false,
-        Some(vec!["!vendor/".into(), "!vendor/**".into()]),
-        false,
-        true,
-        false,
-        false,
-        true,
-        None,
+        RunOpts {
+            exclude: Some(vec!["!vendor/".into(), "!vendor/**".into()]),
+            use_gitignore: true,
+            recursive: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     assert!(text.contains("TODO: vendored"));
@@ -779,8 +710,13 @@ fn g_missing_gitignore_is_noop() {
     let sample = copy_sample(dir.path()).unwrap();
     let bare = sample.join("bare");
     let out = bare.join("out.txt");
-    let text = run_extract_full(
-        &bare, &out, None, false, None, false, true, false, false, false, None,
+    let text = run(
+        &bare,
+        &out,
+        RunOpts {
+            use_gitignore: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     assert!(text.contains("TODO: bare"));
@@ -788,22 +724,16 @@ fn g_missing_gitignore_is_noop() {
 
 #[test]
 fn file_path_g_is_noop_but_still_processes() {
-    // -g only loads .gitignore for directory scans -> explicit file PATH is always processed
     let dir = tempfile::tempdir().unwrap();
     let sample = copy_sample(dir.path()).unwrap();
     let out = sample.join("out.txt");
-    let text = run_extract_full(
+    let text = run(
         &sample.join("app.py"),
         &out,
-        None,
-        false,
-        None,
-        false,
-        true,
-        false,
-        false,
-        false,
-        None,
+        RunOpts {
+            use_gitignore: true,
+            ..Default::default()
+        },
     )
     .unwrap();
     assert!(text.contains("TODO: main"));

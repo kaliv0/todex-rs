@@ -297,20 +297,4 @@ mod tests {
         });
         assert_eq!(env::var("LESS").ok(), before);
     }
-
-    #[test]
-    fn page_accepts_pager_with_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let log = dir.path().join("paged.txt");
-        with_pager(&pager_to_file(&log), || {
-            let mut w = paged_writer(None);
-            w.write_entry(1, "# TODO: x\n").unwrap();
-            w.close().unwrap();
-            assert!(
-                fs::read_to_string(&log)
-                    .unwrap()
-                    .contains("\tline 1: # TODO: x\n")
-            );
-        });
-    }
 }

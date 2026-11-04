@@ -445,6 +445,13 @@ mod tests {
             .map(|m| m.as_str().to_string())
     }
 
+    fn default_extractor(path: impl AsRef<Path>) -> Extractor {
+        Extractor::new(
+            path, None, false, None, false, false, false, false, false, None, false,
+        )
+        .unwrap()
+    }
+
     #[test]
     fn empty_with_ignore_default_raises() {
         let err = Extractor::prepare_token_pattern(Vec::new(), true).unwrap_err();
@@ -501,35 +508,21 @@ mod tests {
     }
 
     #[test]
-    fn prefers_longer_token() {
-        assert_eq!(
-            matched(&["FIX", "FIXME"], true, "FIXME: later").as_deref(),
-            Some("FIXME")
-        );
-        assert_eq!(
-            matched(&["FIX", "FIXME"], true, "FIX: now").as_deref(),
-            Some("FIX")
-        );
-    }
-
-    #[test]
-    fn overlap_leftmost_longest() {
-        assert_eq!(
-            matched(&["AB", "ABC", "BC"], true, " ABC ").as_deref(),
-            Some("ABC")
-        );
-    }
-
-    #[test]
-    fn non_ascii_token_boundary() {
-        assert_eq!(
-            matched(&["中文标记"], true, "中文标记: alone").as_deref(),
-            Some("中文标记")
-        );
-        assert_eq!(
-            matched(&["中文标记"], true, "前中文标记后").as_deref(),
-            None
-        );
+    fn match_edge_cases() {
+        let cases: &[(&[&str], &str, Option<&str>)] = &[
+            (&["FIX", "FIXME"], "FIXME: later", Some("FIXME")),
+            (&["FIX", "FIXME"], "FIX: now", Some("FIX")),
+            (&["AB", "ABC", "BC"], " ABC ", Some("ABC")),
+            (&["中文标记"], "中文标记: alone", Some("中文标记")),
+            (&["中文标记"], "前中文标记后", None),
+        ];
+        for (tokens, line, expected) in cases {
+            assert_eq!(
+                matched(tokens, true, line).as_deref(),
+                *expected,
+                "tokens={tokens:?} line={line:?}"
+            );
+        }
     }
 
     #[test]
@@ -562,20 +555,7 @@ mod tests {
     #[test]
     fn get_snippet_count_after_token() {
         let dir = tempfile::tempdir().unwrap();
-        let ext = Extractor::new(
-            dir.path(),
-            None,
-            false,
-            None,
-            false,
-            false,
-            false,
-            false,
-            false,
-            None,
-            false,
-        )
-        .unwrap();
+        let ext = default_extractor(dir.path());
         for (line, expected) in [("# TODO: x", 1usize), ("# TODO{3} x", 3)] {
             let token_end = line.find("TODO").unwrap() + "TODO".len();
             assert_eq!(
@@ -589,21 +569,7 @@ mod tests {
     #[test]
     fn max_depth_none_uses_default() {
         let dir = tempfile::tempdir().unwrap();
-        let ext = Extractor::new(
-            dir.path(),
-            None,
-            false,
-            None,
-            false,
-            false,
-            false,
-            false,
-            false,
-            None,
-            false,
-        )
-        .unwrap();
-        assert_eq!(ext.max_depth, DEFAULT_MAX_DEPTH);
+        assert_eq!(default_extractor(dir.path()).max_depth, DEFAULT_MAX_DEPTH);
     }
 
     #[test]
@@ -644,8 +610,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("app.py");
         fs::write(&file, "# TODO: x\n").unwrap();
-        let gitignore = dir.path().join(".gitignore");
-        fs::write(&gitignore, "vendor/\n").unwrap();
+        fs::write(dir.path().join(".gitignore"), "vendor/\n").unwrap();
         let ext = Extractor::new(
             &file, None, false, None, false, true, false, false, false, None, false,
         )
