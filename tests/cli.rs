@@ -1,19 +1,12 @@
 mod common;
 
 use std::{
+    fs,
     io::Read,
-    process::{Command, Output, Stdio},
+    process::{Command, Stdio},
 };
 
-use common::{APP_OUT, copy_sample};
-
-fn tdx() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_tdx"))
-}
-
-fn run_tdx(args: &[&str]) -> Output {
-    tdx().args(args).output().expect("run tdx")
-}
+use common::{APP_OUT, copy_file, copy_sample, run_tdx, tdx, write_good_and_bad};
 
 #[test]
 fn missing_dependent_flag_errors() {
@@ -57,10 +50,10 @@ fn max_depth_rejects_invalid_values() {
 #[test]
 fn argv_reaches_extractor() {
     let dir = tempfile::tempdir().unwrap();
-    let sample = copy_sample(dir.path()).unwrap();
-    let out = sample.join("cli_out.txt");
+    let src = copy_file(dir.path(), "app.py").unwrap();
+    let out = dir.path().join("cli_out.txt");
     let output = run_tdx(&[
-        sample.join("app.py").to_str().unwrap(),
+        src.to_str().unwrap(),
         "-o",
         out.to_str().unwrap(),
         "-t",
@@ -72,7 +65,7 @@ fn argv_reaches_extractor() {
         "stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let text = std::fs::read_to_string(&out).unwrap();
+    let text = fs::read_to_string(&out).unwrap();
     assert!(text.contains("WARN"));
     assert!(!text.contains("TODO: main"));
 }
@@ -95,7 +88,7 @@ fn r_m_limits_depth_via_cli() {
         "stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let text = std::fs::read_to_string(&out).unwrap();
+    let text = fs::read_to_string(&out).unwrap();
     assert!(text.contains("TODO: deep"));
     assert!(!text.contains("TODO: deeper"));
 }
@@ -119,34 +112,29 @@ fn stdout_mix_errors() {
 #[test]
 fn s_via_cli() {
     let dir = tempfile::tempdir().unwrap();
-    let sample = copy_sample(dir.path()).unwrap();
-    let output = run_tdx(&[sample.join("app.py").to_str().unwrap(), "-s"]);
+    let src = copy_file(dir.path(), "app.py").unwrap();
+    let output = run_tdx(&[src.to_str().unwrap(), "-s"]);
     assert!(
         output.status.success(),
         "stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), APP_OUT);
-    assert!(!sample.join("TODO").exists());
+    assert!(!dir.path().join("TODO").exists());
 }
 
 #[test]
 fn tee_via_cli() {
     let dir = tempfile::tempdir().unwrap();
-    let sample = copy_sample(dir.path()).unwrap();
-    let out = sample.join("cli_tee_out.txt");
-    let output = run_tdx(&[
-        sample.join("app.py").to_str().unwrap(),
-        "-o",
-        out.to_str().unwrap(),
-        "--tee",
-    ]);
+    let src = copy_file(dir.path(), "app.py").unwrap();
+    let out = dir.path().join("cli_tee_out.txt");
+    let output = run_tdx(&[src.to_str().unwrap(), "-o", out.to_str().unwrap(), "--tee"]);
     assert!(
         output.status.success(),
         "stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(std::fs::read_to_string(&out).unwrap(), APP_OUT);
+    assert_eq!(fs::read_to_string(&out).unwrap(), APP_OUT);
     assert_eq!(String::from_utf8_lossy(&output.stdout), APP_OUT);
 }
 
@@ -237,4 +225,108 @@ fn keyboard_interrupt_exits_130() {
         "stderr should be quiet on interrupt, got={}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn skips_undecodable_file_and_continues() {
+    for debug in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        write_good_and_bad(dir.path()).unwrap();
+        let out = dir.path().join("out.txt");
+        let path = dir.path().to_str().unwrap();
+        let out_s = out.to_str().unwrap();
+        let mut cmd = tdx();
+        cmd.args([path, "-o", out_s]);
+        if debug {
+            cmd.arg("-d");
+        }
+        let output = cmd.output().unwrap();
+        assert!(
+            output.status.success(),
+            "stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = fs::read_to_string(&out).unwrap();
+        assert!(text.contains("TODO: keep me"));
+        let err = String::from_utf8_lossy(&output.stderr);
+        if debug {
+            assert!(err.contains("skipping"), "err={err}");
+            assert!(err.contains("bad.bin"), "err={err}");
+            assert!(err.to_ascii_lowercase().contains("utf-8"), "err={err}");
+        } else {
+            assert_eq!(err, "");
+        }
+    }
+}
+
+#[test]
+fn skips_undecodable_mid_file_keeps_prior_hits() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("mixed.py");
+    let mut bytes = b"# TODO: first\n".to_vec();
+    bytes.extend(std::iter::repeat_n(b'x', 10000));
+    bytes.extend_from_slice(b"\n\xff\xfe bad\n");
+    fs::write(&src, bytes).unwrap();
+    let out = dir.path().join("out.txt");
+    let output = tdx()
+        .args([src.to_str().unwrap(), "-o", out.to_str().unwrap(), "-d"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(fs::read_to_string(&out).unwrap().contains("TODO: first"));
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(err.contains("skipping"), "err={err}");
+    assert!(err.contains("mixed.py"), "err={err}");
+}
+
+#[test]
+fn tee_without_out_uses_todo() {
+    let dir = tempfile::tempdir().unwrap();
+    copy_file(dir.path(), "app.py").unwrap();
+    let output = tdx()
+        .current_dir(dir.path())
+        .args(["app.py", "--tee"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("TODO")).unwrap(),
+        APP_OUT
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), APP_OUT);
+}
+
+#[test]
+fn tee_survives_broken_stdout() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = copy_file(dir.path(), "app.py").unwrap();
+    let out = dir.path().join("out.txt");
+    let mut child = tdx()
+        .args([src.to_str().unwrap(), "-o", out.to_str().unwrap(), "--tee"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    let status = child.wait().unwrap();
+    // tee still finishes the file; broken stdout is not always a hard failure
+    assert!(status.success() || status.code() == Some(1));
+    assert_eq!(fs::read_to_string(&out).unwrap(), APP_OUT);
+}
+
+#[test]
+fn stdout_has_no_out_skip() {
+    let dir = tempfile::tempdir().unwrap();
+    let todo = dir.path().join("TODO");
+    fs::write(&todo, "# TODO: keep scanning me\n").unwrap();
+    let output = tdx()
+        .args([dir.path().to_str().unwrap(), "-s"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("TODO: keep scanning me"));
 }

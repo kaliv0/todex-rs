@@ -1,12 +1,44 @@
-#![allow(dead_code)]
+#![allow(dead_code)] // kept here so we don't switch to common/mod.rs layout
 
 use std::{
-    fs, io,
+    env, fs, io,
     path::{Path, PathBuf},
-    sync::{Arc, atomic::AtomicBool},
+    process::{Command, Output},
+    sync::{Arc, Mutex, MutexGuard, atomic::AtomicBool},
 };
 
 use todex::{Extractor, ExtractorConfig, OutputDest, Result, Writer};
+
+pub fn tdx() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_tdx"))
+}
+
+pub fn run_tdx(args: &[&str]) -> Output {
+    tdx().args(args).output().expect("run tdx")
+}
+
+static CWD_LOCK: Mutex<()> = Mutex::new(());
+
+/// Holds process cwd for one test and restores it on drop (serialized via `CWD_LOCK`)
+pub struct CwdGuard {
+    prev: PathBuf,
+    _lock: MutexGuard<'static, ()>,
+}
+
+impl CwdGuard {
+    pub fn enter(dir: &Path) -> Self {
+        let lock = CWD_LOCK.lock().unwrap();
+        let prev = env::current_dir().unwrap();
+        env::set_current_dir(dir).unwrap();
+        Self { prev, _lock: lock }
+    }
+}
+
+impl Drop for CwdGuard {
+    fn drop(&mut self) {
+        let _ = env::set_current_dir(&self.prev);
+    }
+}
 
 pub fn no_interrupt() -> Arc<AtomicBool> {
     Arc::new(AtomicBool::new(false))
@@ -14,20 +46,6 @@ pub fn no_interrupt() -> Arc<AtomicBool> {
 
 pub const APP_OUT: &str =
     "======================\napp.py\n\tline 1: # TODO: main\n\tline 2: # FIXME: bug\n";
-
-#[derive(Default)]
-pub struct RunOpts {
-    pub tokens: Option<Vec<String>>,
-    pub ignore_default: bool,
-    pub exclude: Option<Vec<String>>,
-    pub include_hidden: bool,
-    pub use_gitignore: bool,
-    pub full_path: bool,
-    pub concise: bool,
-    pub recursive: bool,
-    pub max_depth: Option<usize>,
-    pub debug: bool,
-}
 
 pub fn testdata_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata")
@@ -45,36 +63,41 @@ pub fn copy_sample(dest: &Path) -> io::Result<PathBuf> {
     Ok(project)
 }
 
-pub fn extractor(path: impl AsRef<Path>, opts: RunOpts) -> Result<Extractor> {
-    Extractor::new(
-        path,
-        ExtractorConfig {
-            tokens: opts.tokens,
-            ignore_default: opts.ignore_default,
-            exclude: opts.exclude,
-            include_hidden: opts.include_hidden,
-            use_gitignore: opts.use_gitignore,
-            full_path: opts.full_path,
-            concise: opts.concise,
-            recursive: opts.recursive,
-            max_depth: opts.max_depth,
-            debug: opts.debug,
-        },
-    )
+pub fn copy_file(dest: &Path, name: &str) -> io::Result<PathBuf> {
+    let dest_file = dest.join(name);
+    if let Some(parent) = dest_file.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(testdata_root().join(name), &dest_file)?;
+    Ok(dest_file)
 }
 
 pub fn file_writer(out: &Path) -> Result<Writer> {
     Writer::new(OutputDest::file(out.to_str()), no_interrupt())
 }
 
-pub fn run(path: &Path, out: &Path, opts: RunOpts) -> Result<String> {
-    let ext = extractor(path, opts)?;
+pub fn run(path: &Path, out: &Path, config: ExtractorConfig) -> Result<String> {
+    let ext = Extractor::new(path, config)?;
     let mut writer = file_writer(out)?;
     ext.run(&mut writer)?;
     if out.is_file() {
         Ok(fs::read_to_string(out)?)
     } else {
         Ok(String::new())
+    }
+}
+
+pub fn run_default(path: &Path, out: &Path) -> Result<String> {
+    run(path, out, ExtractorConfig::default())
+}
+
+pub fn assert_appears_in_order(text: &str, needles: &[&str]) {
+    let mut from = 0;
+    for needle in needles {
+        match text[from..].find(needle) {
+            Some(i) => from += i + needle.len(),
+            None => panic!("expected {needle:?} after offset {from} in:\n{text}"),
+        }
     }
 }
 

@@ -1,9 +1,8 @@
-use std::{
-    fs,
-    sync::{Arc, atomic::AtomicBool},
-};
+mod common;
 
-use todex::{OutputDest, Writer};
+use std::fs;
+
+use common::file_writer;
 
 #[test]
 fn out_path_truncated_on_init() {
@@ -11,11 +10,7 @@ fn out_path_truncated_on_init() {
     let out = dir.path().join("out.txt");
     fs::write(&out, "stale\n").unwrap();
 
-    let mut w = Writer::new(
-        OutputDest::file(out.to_str()),
-        Arc::new(AtomicBool::new(false)),
-    )
-    .unwrap();
+    let mut w = file_writer(&out).unwrap();
     w.close().unwrap();
 
     assert_eq!(fs::read_to_string(&out).unwrap(), "");
