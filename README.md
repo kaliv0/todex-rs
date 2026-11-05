@@ -29,9 +29,3 @@ tdx <PATH> [OPTIONS...]
 | `-s`, `--stdout` | output result to stdout |
 | `--tee` | output result to stdout and save to file |
 | `-V`, `--version` | show program's version number and exit |
-
----
-
-## Usage of LLMs
-
-*Todex*'s application code is written by hand. LLMs are used to maintain the test suite and optimize certain parts of the code base.
